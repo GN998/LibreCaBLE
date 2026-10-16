@@ -3,7 +3,6 @@ import java.util.Properties
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
-    id("org.jetbrains.kotlin.plugin.serialization")
 }
 
 val localProperties = Properties().apply {
@@ -26,7 +25,8 @@ android {
     namespace = "com.dev.fido.bridge"
     compileSdk = 34
 
-    // Add signingConfigs for fixed certificate
+    // Enforce deterministic APK signing certificate so external credential providers
+    // (e.g., Authnkey, Bitwarden) can reliably verify the app's SHA-256 fingerprint allowlist.
     signingConfigs {
         create("fixedConfig") {
             val keystoreFile = rootProject.file("my-release-key.jks")
@@ -36,6 +36,10 @@ android {
                 storePassword = System.getenv("STORE_PASSWORD") ?: localProperties.getProperty("STORE_PASSWORD")
                 keyAlias = System.getenv("KEY_ALIAS") ?: localProperties.getProperty("KEY_ALIAS")
                 keyPassword = System.getenv("KEY_PASSWORD") ?: localProperties.getProperty("KEY_PASSWORD")
+            } else if (System.getenv("CI") == "true" || System.getenv("GITHUB_ACTIONS") == "true") {
+                // Fail fast in CI environments to prevent producing unsigned or mismatched APKs
+                // that silently break CredentialManager privileged allowlist checks.
+                throw GradleException("Build failed: my-release-key.jks is missing in CI environment!")
             }
         }
     }
@@ -52,12 +56,10 @@ android {
     }
 
     buildTypes {
-        // Apply fixedConfig to debug build
         getByName("debug") {
             signingConfig = signingConfigs.getByName("fixedConfig")
         }
         release {
-            // Apply fixedConfig to release build
             signingConfig = signingConfigs.getByName("fixedConfig")
             isMinifyEnabled = true
             isShrinkResources = true
@@ -78,7 +80,7 @@ android {
     }
 
     buildFeatures {
-        viewBinding = true
+        // Disable viewBinding as UI is constructed programmatically, reducing build overhead
         buildConfig = true
     }
 }
@@ -89,17 +91,10 @@ dependencies {
     implementation("com.google.android.material:material:1.12.0")
 
     // Android 14 CredentialManager (Core API)
-    // Removed legacy credentials-play-services-auth transitive dependency to prevent unwanted GMS permissions
+    // Omit legacy credentials-play-services-auth dependency to prevent unwanted GMS permissions
     implementation("androidx.credentials:credentials:1.3.0-alpha04")
-
-    // kotlinx.serialization
-    implementation("org.jetbrains.kotlinx:kotlinx-serialization-core:1.6.3")
-    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
-    implementation("org.jetbrains.kotlinx:kotlinx-serialization-cbor:1.6.3")
 
     // Coroutines & WebSockets
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
-
-    // Note: CameraX & ZXing dependencies removed for Step 1 (External FIDO URI integration)
 }

@@ -23,15 +23,13 @@ object HybridQrParser {
 
             val cborMap = CtapCodec.SimpleCbor.read(cborBytes) as? Map<*, *> ?: return null
 
-            // Key 0: 33-byte compressed P-256 public key
-            val publicKey = (cborMap[0L] ?: cborMap[0]) as? ByteArray ?: return null
+            // Query Long keys directly since SimpleCbor always deserializes unsigned integers as Long
+            val publicKey = cborMap[0L] as? ByteArray ?: return null
+            val secret = cborMap[1L] as? ByteArray ?: return null
 
-            // Key 1: 16-byte random QR secret
-            val secret = (cborMap[1L] ?: cborMap[1]) as? ByteArray ?: return null
-
-            // Key 2: Tunnel Server ID (assigned domain index or hashed domain ID)
-            val tunnelServerIdRaw = (cborMap[2L] ?: cborMap[2]) as? Number
-            val tunnelServerId = tunnelServerIdRaw?.toInt() ?: BuildConfig.TUNNEL_ID
+            // In CTAP 2.3 §11.5.1.1, QR CBOR Key 2 is numAssignedDomains, NOT the tunnel server ID.
+            // The tunnel server ID is chosen by the authenticator (BuildConfig.TUNNEL_ID) and advertised via BLE EID.
+            val tunnelServerId = BuildConfig.TUNNEL_ID
 
             return HybridQrData(
                 version = 2,

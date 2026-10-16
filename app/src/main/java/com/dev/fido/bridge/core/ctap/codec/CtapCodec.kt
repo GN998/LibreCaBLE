@@ -1,10 +1,12 @@
 package com.dev.fido.bridge.core.ctap.codec
 
 import android.util.Log
+import com.dev.fido.bridge.core.ctap.AuthenticatorInfo
+import com.dev.fido.bridge.core.ctap.model.CredentialDescriptor
 import com.dev.fido.bridge.core.ctap.model.Ctap2Request
 import com.dev.fido.bridge.core.ctap.model.Ctap2Response
 import com.dev.fido.bridge.core.ctap.model.CtapStatus
-import com.dev.fido.bridge.core.ctap.model.CredentialDescriptor
+import java.io.ByteArrayOutputStream
 
 /**
  * Custom exception representing CTAP codec errors with standard protocol status codes.
@@ -14,6 +16,15 @@ class CtapCodecException(
     message: String,
     cause: Throwable? = null
 ) : IllegalArgumentException(message, cause)
+
+/**
+ * Map CTAP2 boolean "uv" option flag to WebAuthn userVerification requirement string.
+ */
+fun Boolean?.toWebAuthnUv(): String = when (this) {
+    true -> "required"
+    false -> "discouraged"
+    null -> "preferred"
+}
 
 object CtapCodec {
 
@@ -26,7 +37,7 @@ object CtapCodec {
 
         // Validate command code explicitly and throw CtapCodecException with ERR_INVALID_COMMAND (0x01)
         return when (commandByte) {
-            0x04.toByte() -> Ctap2Request.GetInfo()
+            0x04.toByte() -> Ctap2Request.GetInfo
             0x01.toByte() -> decodeMakeCredential(cborBytes)
             0x02.toByte() -> decodeGetAssertion(cborBytes)
             else -> throw CtapCodecException(
@@ -59,7 +70,7 @@ object CtapCodec {
 
             val pubKeyCredParamsRaw = map[4L] as? List<*> ?: emptyList<Any>()
 
-            // Safely validate required fields 'type' and 'alg' without non-null assertions (!!)
+            // Validate required fields 'type' and 'alg' without non-null assertions
             val pubKeyCredParams = pubKeyCredParamsRaw.map { item ->
                 val paramMap = item as? Map<*, *>
                     ?: throw CtapCodecException(CtapStatus.ERR_CBOR_UNEXPECTED_TYPE, "pubKeyCredParams element must be a map")
@@ -74,6 +85,17 @@ object CtapCodec {
                 )
             }
 
+            // Extract excludeList (key 5) to prevent duplicate credential registration on the authenticator
+            val excludeList = parseDescriptorList(map[5L], "excludeList")
+
+            // Extract options (key 7) such as resident key (rk) and user verification (uv) requirements
+            val optionsRaw = map[7L] as? Map<*, *>
+            val options = optionsRaw?.entries?.mapNotNull { (k, v) ->
+                val keyStr = k as? String
+                val valBool = v as? Boolean
+                if (keyStr != null && valBool != null) keyStr to valBool else null
+            }?.toMap()
+
             Ctap2Request.MakeCredential(
                 clientDataHash = clientDataHash,
                 rpId = rpId,
@@ -81,7 +103,9 @@ object CtapCodec {
                 userId = userId,
                 userName = userName,
                 userDisplayName = userDisplayName,
-                pubKeyCredParams = pubKeyCredParams
+                pubKeyCredParams = pubKeyCredParams,
+                excludeList = excludeList,
+                options = options
             )
         } catch (e: CtapCodecException) {
             throw e
@@ -101,20 +125,17 @@ object CtapCodec {
             val clientDataHash = map[2L] as? ByteArray
                 ?: throw CtapCodecException(CtapStatus.ERR_INVALID_CBOR, "Missing clientDataHash (key 2)")
 
-            val allowListRaw = map[3L] as? List<*>
-            val allowList = allowListRaw?.map { item ->
-                val descMap = item as? Map<*, *>
-                    ?: throw CtapCodecException(CtapStatus.ERR_CBOR_UNEXPECTED_TYPE, "allowList element must be a map")
-                val type = descMap["type"] as? String ?: "public-key"
-                val id = descMap["id"] as? ByteArray
-                    ?: throw CtapCodecException(CtapStatus.ERR_INVALID_CBOR, "Missing id in allowList descriptor")
-                CredentialDescriptor(type = type, id = id)
-            }
+            val allowList = parseDescriptorList(map[3L], "allowList")
+
+            // Map CTAP2 options (key 5) uv flag to WebAuthn userVerification requirement
+            val optionsRaw = map[5L] as? Map<*, *>
+            val uvFlag = optionsRaw?.get("uv") as? Boolean
 
             Ctap2Request.GetAssertion(
                 rpId = rpId,
                 clientDataHash = clientDataHash,
-                allowList = allowList
+                allowList = allowList,
+                userVerification = uvFlag.toWebAuthnUv()
             )
         } catch (e: CtapCodecException) {
             throw e
@@ -124,19 +145,26 @@ object CtapCodec {
         }
     }
 
+    /**
+     * Parse CBOR array of PublicKeyCredentialDescriptor maps shared by MakeCredential and GetAssertion.
+     */
+    private fun parseDescriptorList(rawList: Any?, fieldName: String): List<CredentialDescriptor>? {
+        val list = rawList as? List<*> ?: return null
+        return list.map { item ->
+            val descMap = item as? Map<*, *>
+                ?: throw CtapCodecException(CtapStatus.ERR_CBOR_UNEXPECTED_TYPE, "$fieldName element must be a map")
+            val type = descMap["type"] as? String ?: "public-key"
+            val id = descMap["id"] as? ByteArray
+                ?: throw CtapCodecException(CtapStatus.ERR_INVALID_CBOR, "Missing id in $fieldName descriptor")
+            CredentialDescriptor(type = type, id = id)
+        }
+    }
+
     fun encodeResponse(response: Ctap2Response): ByteArray {
         return when (response) {
             is Ctap2Response.ErrorResponse -> byteArrayOf(response.errorCode)
             is Ctap2Response.GetInfoResponse -> {
-                val map = mapOf(
-                    1L to response.versions,
-                    2L to response.extensions,
-                    3L to response.aaguid,
-                    4L to response.options,
-                    5L to response.maxMsgSize.toLong(),
-                    6L to response.pinUvAuthProtocols.map { it.toLong() }
-                )
-                byteArrayOf(CtapStatus.SUCCESS) + SimpleCbor.write(map)
+                byteArrayOf(CtapStatus.SUCCESS) + SimpleCbor.write(AuthenticatorInfo.toCborMap(response))
             }
             is Ctap2Response.MakeCredentialResponse -> {
                 val map = mapOf(
@@ -169,6 +197,7 @@ object CtapCodec {
                 return bytes[pos++].toInt() and 0xFF
             }
             fun readBytes(len: Int): ByteArray {
+                if (len < 0 || pos + len > bytes.size) throw IndexOutOfBoundsException()
                 val res = bytes.copyOfRange(pos, pos + len)
                 pos += len
                 return res
@@ -178,30 +207,41 @@ object CtapCodec {
                 val b = readByte()
                 val majorType = b shr 5
                 val info = b and 0x1F
-                var value = info.toLong()
-                
-                if (info == 24) value = readByte().toLong()
-                else if (info == 25) value = ((readByte() shl 8) or readByte()).toLong()
-                else if (info == 26) {
-                    val i = (readByte() shl 24) or (readByte() shl 16) or (readByte() shl 8) or readByte()
-                    value = i.toLong() and 0xFFFFFFFFL
-                } else if (info == 27) {
-                    pos += 8 // Not fully supported, skipped
-                    return null
+
+                // Decode 64-bit integers (info == 27) properly to prevent silent data corruption on large values
+                val value: Long = when {
+                    info < 24 -> info.toLong()
+                    info == 24 -> readByte().toLong()
+                    info == 25 -> ((readByte() shl 8) or readByte()).toLong()
+                    info == 26 -> {
+                        val i = (readByte() shl 24) or (readByte() shl 16) or (readByte() shl 8) or readByte()
+                        i.toLong() and 0xFFFFFFFFL
+                    }
+                    info == 27 -> {
+                        (readByte().toLong() shl 56) or
+                        (readByte().toLong() shl 48) or
+                        (readByte().toLong() shl 40) or
+                        (readByte().toLong() shl 32) or
+                        (readByte().toLong() shl 24) or
+                        (readByte().toLong() shl 16) or
+                        (readByte().toLong() shl 8) or
+                        readByte().toLong()
+                    }
+                    else -> return null
                 }
-                
+
                 return when (majorType) {
                     0 -> value
                     1 -> -1L - value
                     2 -> readBytes(value.toInt())
-                    3 -> String(readBytes(value.toInt()))
+                    3 -> String(readBytes(value.toInt()), Charsets.UTF_8)
                     4 -> {
                         val list = mutableListOf<Any?>()
                         for (i in 0 until value) list.add(readItem())
                         list
                     }
                     5 -> {
-                        val map = mutableMapOf<Any?, Any?>()
+                        val map = linkedMapOf<Any?, Any?>()
                         for (i in 0 until value) map[readItem()] = readItem()
                         map
                     }
@@ -219,40 +259,57 @@ object CtapCodec {
         }
 
         fun write(value: Any?): ByteArray {
-            var bytes = ByteArray(0)
+            // Use ByteArrayOutputStream to avoid O(N^2) array allocations during serialization
+            val out = ByteArrayOutputStream()
             fun writeMajor(major: Int, v: Long) {
                 val type = major shl 5
-                if (v < 24) {
-                    bytes += (type or v.toInt()).toByte()
-                } else if (v < 256) {
-                    bytes += (type or 24).toByte()
-                    bytes += v.toByte()
-                } else if (v < 65536) {
-                    bytes += (type or 25).toByte()
-                    bytes += (v shr 8).toByte()
-                    bytes += v.toByte()
-                } else {
-                    bytes += (type or 26).toByte()
-                    bytes += (v shr 24).toByte()
-                    bytes += (v shr 16).toByte()
-                    bytes += (v shr 8).toByte()
-                    bytes += v.toByte()
+                when {
+                    v < 24 -> out.write(type or v.toInt())
+                    v < 0x100 -> {
+                        out.write(type or 24)
+                        out.write(v.toInt())
+                    }
+                    v < 0x10000 -> {
+                        out.write(type or 25)
+                        out.write((v shr 8).toInt())
+                        out.write(v.toInt())
+                    }
+                    v < 0x100000000L -> {
+                        out.write(type or 26)
+                        out.write((v shr 24).toInt())
+                        out.write((v shr 16).toInt())
+                        out.write((v shr 8).toInt())
+                        out.write(v.toInt())
+                    }
+                    else -> {
+                        out.write(type or 27)
+                        out.write((v shr 56).toInt())
+                        out.write((v shr 48).toInt())
+                        out.write((v shr 40).toInt())
+                        out.write((v shr 32).toInt())
+                        out.write((v shr 24).toInt())
+                        out.write((v shr 16).toInt())
+                        out.write((v shr 8).toInt())
+                        out.write(v.toInt())
+                    }
                 }
             }
             fun writeItem(v: Any?) {
                 when (v) {
-                    is Int -> if (v >= 0) writeMajor(0, v.toLong()) else writeMajor(1, (-v - 1).toLong())
-                    is Long -> if (v >= 0) writeMajor(0, v) else writeMajor(1, (-v - 1))
-                    is ByteArray -> { writeMajor(2, v.size.toLong()); bytes += v }
-                    is String -> { val b = v.toByteArray(); writeMajor(3, b.size.toLong()); bytes += b }
+                    null -> out.write(0xF6)
+                    is Int -> if (v >= 0) writeMajor(0, v.toLong()) else writeMajor(1, -1L - v.toLong())
+                    is Long -> if (v >= 0) writeMajor(0, v) else writeMajor(1, -1L - v)
+                    is ByteArray -> { writeMajor(2, v.size.toLong()); out.write(v) }
+                    is String -> { val b = v.toByteArray(Charsets.UTF_8); writeMajor(3, b.size.toLong()); out.write(b) }
                     is List<*> -> { writeMajor(4, v.size.toLong()); v.forEach { writeItem(it) } }
                     is Map<*, *> -> {
                         writeMajor(5, v.size.toLong())
+                        // Sort map keys canonically per CTAP2 specification (length first, then lexicographical byte order)
                         val sortedEntries = v.entries.map { (k, vl) ->
-                            Pair(k, write(k)) to vl
+                            write(k) to vl
                         }.sortedWith { a, b ->
-                            val k1Bytes = a.first.second
-                            val k2Bytes = b.first.second
+                            val k1Bytes = a.first
+                            val k2Bytes = b.first
                             if (k1Bytes.size != k2Bytes.size) {
                                 k1Bytes.size.compareTo(k2Bytes.size)
                             } else {
@@ -268,16 +325,16 @@ object CtapCodec {
                                 cmp
                             }
                         }
-                        sortedEntries.forEach { (keyPair, vl) ->
-                            writeItem(keyPair.first)
+                        sortedEntries.forEach { (kBytes, vl) ->
+                            out.write(kBytes)
                             writeItem(vl)
                         }
                     }
-                    is Boolean -> bytes += if (v) 0xF5.toByte() else 0xF4.toByte()
+                    is Boolean -> out.write(if (v) 0xF5 else 0xF4)
                 }
             }
             writeItem(value)
-            return bytes
+            return out.toByteArray()
         }
     }
 }

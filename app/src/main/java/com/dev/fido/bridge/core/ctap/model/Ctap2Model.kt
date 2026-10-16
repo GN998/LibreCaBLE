@@ -1,8 +1,9 @@
 package com.dev.fido.bridge.core.ctap.model
 
 sealed class Ctap2Request {
-    data class GetInfo(val dummy: Boolean = true) : Ctap2Request()
-    
+    // Use singleton data object to avoid allocating dummy fields for stateless GetInfo requests
+    data object GetInfo : Ctap2Request()
+
     data class GetAssertion(
         val rpId: String,
         val clientDataHash: ByteArray,
@@ -17,7 +18,9 @@ sealed class Ctap2Request {
         val userId: ByteArray,
         val userName: String,
         val userDisplayName: String,
-        val pubKeyCredParams: List<Map<String, Any>> = emptyList()
+        val pubKeyCredParams: List<Map<String, Any>> = emptyList(),
+        val excludeList: List<CredentialDescriptor>? = null,
+        val options: Map<String, Boolean>? = null
     ) : Ctap2Request()
 }
 
@@ -46,7 +49,6 @@ sealed class Ctap2Response {
     data class MakeCredentialResponse(
         val fmt: String = "none",
         val authData: ByteArray,
-        // Fix: Use Map<*, *> to support nested CBOR elements (like ByteArray signatures)
         val attStmt: Map<*, *> = emptyMap<Any, Any>()
     ) : Ctap2Response()
 

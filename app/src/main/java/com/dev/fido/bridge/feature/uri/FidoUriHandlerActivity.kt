@@ -12,6 +12,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
+import com.dev.fido.bridge.BuildConfig
 import com.dev.fido.bridge.core.hybrid.HybridQrParser
 import com.dev.fido.bridge.core.transport.TransportManager
 import com.dev.fido.bridge.core.transport.ble.HybridBleAdvertiser
@@ -37,10 +38,10 @@ class FidoUriHandlerActivity : AppCompatActivity() {
     }
 
     private fun checkAndRequestPermissions() {
+        // Request only BLUETOOTH_ADVERTISE and BLUETOOTH_CONNECT on Android 14+ without legacy location permissions
         val permissions = listOf(
             Manifest.permission.BLUETOOTH_ADVERTISE,
-            Manifest.permission.BLUETOOTH_CONNECT,
-            Manifest.permission.ACCESS_FINE_LOCATION
+            Manifest.permission.BLUETOOTH_CONNECT
         )
 
         val missingPermissions = permissions.filter {
@@ -58,8 +59,12 @@ class FidoUriHandlerActivity : AppCompatActivity() {
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == PERMISSION_REQUEST_CODE) {
-            initializeController()
-            handleIntent(intent)
+            if (grantResults.isNotEmpty() && grantResults.all { it == PackageManager.PERMISSION_GRANTED }) {
+                initializeController()
+                handleIntent(intent)
+            } else {
+                tv.text = "Bluetooth permissions are required for FIDO proximity verification."
+            }
         }
     }
 
@@ -83,25 +88,39 @@ class FidoUriHandlerActivity : AppCompatActivity() {
 
     override fun onNewIntent(intent: Intent?) {
         super.onNewIntent(intent)
+        setIntent(intent)
         if (::sessionController.isInitialized) {
             handleIntent(intent)
         }
     }
 
     private fun handleIntent(intent: Intent?) {
+        // Verify Bluetooth is enabled before starting a caBLE session so users are not stuck waiting on silent BLE failure
+        val bluetoothManager = getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
+        val bluetoothAdapter = bluetoothManager.adapter
+        if (bluetoothAdapter == null || !bluetoothAdapter.isEnabled) {
+            tv.text = "Bluetooth is turned off.\nPlease enable Bluetooth and scan the FIDO QR code again."
+            return
+        }
+
         val uriString = intent?.dataString ?: intent?.getStringExtra(Intent.EXTRA_TEXT)
         
         if (uriString != null) {
-            // Omit raw URI string on UI to prevent leaking sensitive QR secrets and curve points
+            // Start status output directly from Parsing without exposing raw FIDO URI payload on screen
             tv.text = "Parsing..."
             val qrData = HybridQrParser.parse(uriString)
             
             if (qrData != null) {
-                tv.append("\n\nParsed successfully. Routing to CTAP Dispatcher...")
+                tv.append("\nParsed successfully. Routing to CTAP Dispatcher...")
                 
                 lifecycleScope.launch {
                     try {
-                        sessionController.onQrCodeScanned(qrData.publicKey, qrData.secret)
+                        // Use authenticator's configured BuildConfig.TUNNEL_ID (e.g. 267) per CTAP 2.3 §11.5.1.1.1
+                        sessionController.onQrCodeScanned(
+                            qrData.publicKey,
+                            qrData.secret,
+                            BuildConfig.TUNNEL_ID
+                        )
                         tv.append("\n\nSession initiated.\nBLE Advertising & WebSocket connecting...")
                     } catch (e: Exception) {
                         Log.e("FidoUriHandler", "Error starting session", e)
@@ -113,6 +132,14 @@ class FidoUriHandlerActivity : AppCompatActivity() {
             }
         } else {
             tv.text = "No URI provided. Waiting for FIDO URI intent.\nMake sure you scan a valid FIDO QR code."
+        }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        // Ensure active BLE advertising and WebSocket connections are terminated when Activity exits
+        if (::sessionController.isInitialized) {
+            sessionController.stopSession()
         }
     }
 }
