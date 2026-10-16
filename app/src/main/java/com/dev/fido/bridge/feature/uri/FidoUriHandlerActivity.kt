@@ -34,6 +34,9 @@ class FidoUriHandlerActivity : AppCompatActivity() {
     private lateinit var sessionController: BridgeSessionController
     private val PERMISSION_REQUEST_CODE = 1001
 
+    // Track active FIDO URI to prevent scanner apps from dispatching duplicate intents that cancel ongoing CredentialManager prompts
+    private var activeFidoUri: String? = null
+
     private val bluetoothAdapter: BluetoothAdapter?
         get() = (getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager)?.adapter
 
@@ -179,6 +182,10 @@ class FidoUriHandlerActivity : AppCompatActivity() {
         // Append background network and crypto status directly to UI TextView
         sessionController.onStatusUpdate = { status ->
             tv.append("\n➜ $status")
+            // Release active URI guard upon session termination or error so users can rescan the same QR code
+            if (status.startsWith("CTAP ") || status.startsWith("Peer closed") || status.startsWith("WebSocket Error")) {
+                activeFidoUri = null
+            }
         }
     }
 
@@ -201,6 +208,13 @@ class FidoUriHandlerActivity : AppCompatActivity() {
         val uriString = intent?.dataString ?: intent?.getStringExtra(Intent.EXTRA_TEXT)
 
         if (uriString != null) {
+            // Ignore duplicate intent deliveries of the exact same QR URI to avoid aborting an active CredentialManager prompt
+            if (uriString == activeFidoUri) {
+                Log.d("FidoUriHandler", "Ignoring duplicate FIDO URI intent")
+                return
+            }
+            activeFidoUri = uriString
+
             // Start status output directly from Parsing without exposing raw FIDO URI payload on screen
             tv.text = "Parsing..."
             val qrData = HybridQrParser.parse(uriString)
@@ -217,20 +231,23 @@ class FidoUriHandlerActivity : AppCompatActivity() {
                         )
                         tv.append("\n\nSession initiated.\nBLE Advertising & WebSocket connecting...")
                     } catch (e: Exception) {
+                        activeFidoUri = null
                         Log.e("FidoUriHandler", "Error starting session", e)
                         tv.append("\n\nError: ${e.message}")
                     }
                 }
             } else {
+                activeFidoUri = null
                 tv.append("\n\nInvalid or unsupported FIDO URI.")
             }
-        } else {
+        } else if (activeFidoUri == null) {
             tv.text = "No URI provided. Waiting for FIDO URI intent.\nMake sure you scan a valid FIDO QR code."
         }
     }
 
     override fun onDestroy() {
         super.onDestroy()
+        activeFidoUri = null
         // Ensure active BLE advertising and WebSocket connections are terminated when Activity exits
         if (::sessionController.isInitialized) {
             sessionController.stopSession()
