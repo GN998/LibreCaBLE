@@ -21,7 +21,8 @@ object CtapMapper {
             put("rpId", req.rpId)
             put("userVerification", req.userVerification)
 
-            req.allowList?.let { list ->
+            // Omit empty allowCredentials so Android CredentialManager providers do not reject discoverable credential lookups
+            req.allowList?.takeIf { it.isNotEmpty() }?.let { list ->
                 put("allowCredentials", list.toJsonArray())
             }
         }.toString()

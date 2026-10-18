@@ -22,11 +22,12 @@ class HybridBleAdvertiser(private val advertiser: BluetoothLeAdvertiser?) {
         // Stop any active advertising before starting a new session
         stopAdvertising()
 
+        // Cap high-power BLE advertising at 60 seconds to prevent indefinite battery drain if the peer abandons the QR session
         val settings = AdvertiseSettings.Builder()
             .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_LOW_LATENCY)
             .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_HIGH)
             .setConnectable(false)
-            .setTimeout(0)
+            .setTimeout(60_000)
             .build()
 
         val data = AdvertiseData.Builder()
