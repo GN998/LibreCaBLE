@@ -21,6 +21,20 @@ import kotlinx.coroutines.launch
 class TransportManager(
     private val bleAdvertiser: HybridBleAdvertiser
 ) {
+    companion object {
+        // Pre-serialize immutable post-handshake CBOR payload once to eliminate encoding overhead during handshake
+        private val CACHED_POST_HANDSHAKE_MSG: ByteArray by lazy {
+            // Share canonical AuthenticatorInfo CBOR map to prevent capability drift between pre-flight and 0x04 GetInfo
+            val getInfoBytes = CtapCodec.SimpleCbor.write(AuthenticatorInfo.toCborMap())
+            // Advertise only "ctap" support in Key 3 so clients do not send unimplemented typeJSON (0x03) Digital Credentials frames per CTAP 2.3 §11.5
+            val postHandshakeMap = mapOf(
+                1L to getInfoBytes,
+                3L to listOf("ctap")
+            )
+            CtapCodec.SimpleCbor.write(postHandshakeMap)
+        }
+    }
+
     private val noiseSession = NoiseSession()
     @Volatile
     private var tunnelWebsocket: TunnelWebsocket? = null
@@ -112,14 +126,15 @@ class TransportManager(
                         bleAdvertiser.stopAdvertising()
 
                         val serverHello = noiseSession.processClientHelloAndGenerateServerHello(encryptedFrame)
+                        val encryptedPostHandshake = noiseSession.encrypt(CACHED_POST_HANDSHAKE_MSG)
+
+                        // Enqueue ServerHello and Post-Handshake frames back-to-back before UI dispatch to minimize round-trip latency
                         sessionWs.sendFrame(serverHello)
+                        sessionWs.sendFrame(encryptedPostHandshake)
 
                         val msg = "Noise KNpsk0 Handshake Success!\nSent Post-Handshake Message."
                         Log.d("TransportManager", msg)
                         onStatusUpdate?.invoke(msg)
-
-                        val postHandshakeMsg = buildPostHandshakeMessage()
-                        sessionWs.sendFrame(noiseSession.encrypt(postHandshakeMsg))
                     } else {
                         val decrypted = noiseSession.decrypt(encryptedFrame)
                         if (decrypted.isEmpty()) return@TunnelWebsocket
@@ -223,16 +238,5 @@ class TransportManager(
         bleAdvertiser.stopAdvertising()
         tunnelWebsocket?.close()
         tunnelWebsocket = null
-    }
-
-    private fun buildPostHandshakeMessage(): ByteArray {
-        // Share canonical AuthenticatorInfo CBOR map to prevent capability drift between pre-flight and 0x04 GetInfo
-        val getInfoBytes = CtapCodec.SimpleCbor.write(AuthenticatorInfo.toCborMap())
-        // Advertise only "ctap" support in Key 3 so clients do not send unimplemented typeJSON (0x03) Digital Credentials frames per CTAP 2.3 §11.5
-        val postHandshakeMap = mapOf(
-            1L to getInfoBytes,
-            3L to listOf("ctap")
-        )
-        return CtapCodec.SimpleCbor.write(postHandshakeMap)
     }
 }

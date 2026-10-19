@@ -1,6 +1,7 @@
 package com.dev.fido.bridge.core.transport.noise
 
 import android.util.Log
+import java.security.interfaces.ECPrivateKey
 
 class NoiseSession {
     @Volatile
@@ -10,6 +11,8 @@ class NoiseSession {
     private var noiseState: NoiseHandshakeState? = null
     private var crypter: NoiseCrypter? = null
     private lateinit var peerPublicKeyBytes: ByteArray
+    private lateinit var ephPriv: ECPrivateKey
+    private lateinit var phoneEphemeralPubKey: ByteArray
 
     // Inject the PC's public key (scanned from QR)
     @Synchronized
@@ -32,13 +35,19 @@ class NoiseSession {
         nh.mixHash(byteArrayOf(1))
         nh.mixHash(peerPublicKeyBytes)
         nh.mixKeyAndHash(psk)
+
+        // Pre-compute ephemeral P-256 keypair during BLE advertising idle window to minimize ClientHello response latency
+        val (pub, priv) = CryptoHelper.generateEcKeyPair()
+        ephPriv = priv
+        phoneEphemeralPubKey = CryptoHelper.uncompressECKey(pub)
+
         Log.d("NoiseSession", "Noise KNpsk0 initialized with derived PSK, waiting for ClientHello")
     }
 
     // Step 2: Process the incoming ClientHello and generate ServerHello
     @Synchronized
     fun processClientHelloAndGenerateServerHello(clientHello: ByteArray): ByteArray {
-        // Verify noiseState initialization, which inherently guarantees peerPublicKeyBytes is also initialized
+        // Verify noiseState initialization, which inherently guarantees peerPublicKeyBytes and ephemeral keys are initialized
         val nh = checkNotNull(noiseState) { "Handshake not initialized" }
 
         if (clientHello.size < 81) {
@@ -55,9 +64,6 @@ class NoiseSession {
         if (plaintext.isNotEmpty()) {
             throw IllegalArgumentException("ClientHello decrypted payload must be empty per CTAP 2.3 §11.5.1.2, got ${plaintext.size} bytes")
         }
-
-        val (ephPub, ephPriv) = CryptoHelper.generateEcKeyPair()
-        val phoneEphemeralPubKey = CryptoHelper.uncompressECKey(ephPub)
 
         nh.mixHash(phoneEphemeralPubKey)
         nh.mixKey(phoneEphemeralPubKey)

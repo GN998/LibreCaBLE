@@ -6,7 +6,15 @@ import java.nio.ByteOrder
 object DomainDerivation {
     private val ASSIGNED_DOMAINS = listOf("cable.ua5v.com", "cable.auth.com")
 
+    // Cache the last derived tunnel domain as an atomic pair to avoid redundant SHA-256 and Base32 computations
+    @Volatile
+    private var cachedDerivation: Pair<Int, String>? = null
+
     fun deriveDomainForTunnelId(tunnelId: Int): String {
+        cachedDerivation?.let { (id, domain) ->
+            if (id == tunnelId) return domain
+        }
+
         // IDs below 256 are reserved directly assigned domains
         if (tunnelId < 256) {
             return if (tunnelId in ASSIGNED_DOMAINS.indices) ASSIGNED_DOMAINS[tunnelId] else ASSIGNED_DOMAINS[0]
@@ -36,6 +44,7 @@ object DomainDerivation {
         val tlds = arrayOf(".com", ".org", ".net", ".info")
         ret += tlds[tldIndex]
 
+        cachedDerivation = tunnelId to ret
         return ret
     }
 }
