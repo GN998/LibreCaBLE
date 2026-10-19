@@ -1,5 +1,6 @@
 package com.dev.fido.bridge.core.ctap.codec
 
+import android.util.Half
 import android.util.Log
 import com.dev.fido.bridge.core.ctap.AuthenticatorInfo
 import com.dev.fido.bridge.core.ctap.model.CredentialDescriptor
@@ -29,8 +30,11 @@ fun Boolean?.toWebAuthnUv(): String = when (this) {
 
 object CtapCodec {
 
-    // Standard COSE algorithm identifiers supported by Android CredentialManager providers (ES256, EdDSA, RS256, ES384, ES512, PS256)
-    private val SUPPORTED_COSE_ALGORITHMS = setOf(-7L, -8L, -257L, -35L, -36L, -37L)
+    // Include standard and post-quantum COSE algorithms across CTAP 2.0-2.3 so modern credential providers can negotiate newer key types while still rejecting bogus conformance probes pre-UI
+    private val SUPPORTED_COSE_ALGORITHMS = setOf(
+        -7L, -8L, -9L, -35L, -36L, -37L, -38L, -39L, -47L,
+        -48L, -49L, -50L, -257L, -258L, -259L, -65535L
+    )
 
     fun decodeRequest(rawPayload: ByteArray): Ctap2Request {
         if (rawPayload.isEmpty()) {
@@ -123,9 +127,9 @@ object CtapCodec {
         // Extract and strictly type-check options (key 7) such as resident key (rk) and user verification (uv) requirements per CTAP 2.3 §6.1.2
         val options = parseOptionsMap(map[7L], "MakeCredential.options")
 
-        // Reject explicit "up" option in MakeCredential since FIDO_2_0 authenticators must return CTAP2_ERR_INVALID_OPTION if "up" is present, and "up"=false is invalid across all versions per CTAP 2.3 §6.1
-        if (options?.containsKey("up") == true) {
-            throw CtapCodecException(CtapStatus.ERR_INVALID_OPTION, "Option 'up' is not valid in MakeCredential")
+        // Reject only "up"=false in MakeCredential to maintain forward compatibility with CTAP 2.1+ platforms that explicitly send "up"=true per CTAP 2.3 §6.1.2 Step 5
+        if (options?.get("up") == false) {
+            throw CtapCodecException(CtapStatus.ERR_INVALID_OPTION, "Option 'up'=false is not valid in MakeCredential")
         }
 
         return Ctap2Request.MakeCredential(
@@ -346,6 +350,10 @@ object CtapCodec {
                             20 -> false
                             21 -> true
                             22 -> null
+                            // Decode IEEE 754 half, single, and double precision floats so unknown extension or GREASE map entries containing floats can be safely ignored per CTAP 2.3 §8
+                            25 -> Half.toFloat(value.toShort())
+                            26 -> Float.fromBits(value.toInt())
+                            27 -> Double.fromBits(value)
                             else -> throw CtapCodecException(CtapStatus.ERR_INVALID_CBOR, "Unsupported CBOR simple value or float: $info")
                         }
                     }
