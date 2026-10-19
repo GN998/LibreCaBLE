@@ -27,6 +27,14 @@ object HybridQrParser {
             val publicKey = cborMap[0L] as? ByteArray ?: return null
             val secret = cborMap[1L] as? ByteArray ?: return null
 
+            // Extract optional epoch seconds (Key 3) and flow hint (Key 5) per CTAP 2.3 §11.5.1.1
+            val timestampSeconds = (cborMap[3L] as? Long)?.takeIf { it > 0L }
+            val operationHint = when (val rawHint = cborMap[5L]) {
+                is String -> rawHint
+                is ByteArray -> String(rawHint, Charsets.UTF_8)
+                else -> null
+            }?.let { if (it == "mc") "mc" else "ga" } ?: "ga"
+
             // In CTAP 2.3 §11.5.1.1, QR CBOR Key 2 is numAssignedDomains, NOT the tunnel server ID.
             // Resolve tunnel server ID dynamically to support user runtime overrides alongside build-time defaults.
             val tunnelServerId = TunnelConfigManager.getEffectiveTunnelId()
@@ -34,7 +42,9 @@ object HybridQrParser {
             return HybridQrData(
                 publicKey = publicKey,
                 secret = secret,
-                tunnelServerId = tunnelServerId
+                tunnelServerId = tunnelServerId,
+                timestampSeconds = timestampSeconds,
+                operationHint = operationHint
             )
         } catch (e: Exception) {
             return null

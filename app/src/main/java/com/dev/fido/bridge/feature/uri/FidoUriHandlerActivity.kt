@@ -226,6 +226,17 @@ class FidoUriHandlerActivity : AppCompatActivity() {
             if (qrData != null) {
                 tv.append("\nParsed successfully. Routing to CTAP Dispatcher...")
 
+                // Surface user flow hint immediately upon scan per CTAP 2.3 §11.5.1.1 before receiving CTAP frames
+                val flowLabel = if (qrData.operationHint == "mc") "MakeCredential (Register)" else "GetAssertion (Sign In)"
+                tv.append("\n➜ Flow Hint: $flowLabel")
+
+                // Warn user if scanned QR timestamp exceeds typical client platform session lifetime
+                qrData.timestampSeconds?.let { qrTimestamp ->
+                    if ((System.currentTimeMillis() / 1000L) - qrTimestamp > 120L) {
+                        tv.append("\n➜ Warning: QR code may be expired.")
+                    }
+                }
+
                 try {
                     sessionController.onQrCodeScanned(
                         qrData.publicKey,
