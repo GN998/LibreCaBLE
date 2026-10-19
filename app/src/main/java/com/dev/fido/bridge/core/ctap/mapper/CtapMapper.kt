@@ -48,11 +48,11 @@ object CtapMapper {
                 put("excludeCredentials", list.toJsonArray())
             }
 
-            // Default absent "rk" option to false per CTAP 2.3 §6.1.2 Step 5 while preferring discoverable credentials on Android CredentialManager when not strictly required
+            // Enforce non-discoverable credential creation when "rk" is false or absent per CTAP 2.3 §6.1.2 Step 14 to avoid exhausting hardware security key storage slots
             val rkRequired = req.options?.get("rk") ?: false
             val uvRequired = req.options?.get("uv")
             put("authenticatorSelection", JSONObject().apply {
-                put("residentKey", if (rkRequired) "required" else "preferred")
+                put("residentKey", if (rkRequired) "required" else "discouraged")
                 put("requireResidentKey", rkRequired)
                 put("userVerification", uvRequired.toWebAuthnUv())
             })
@@ -89,11 +89,18 @@ object CtapMapper {
         }
 
         val responseObj = rootObj.getJSONObject("response")
+        // Guard against JSONObject.NULL before calling optString so Android's org.json does not coerce null userHandles from non-discoverable hardware keys into literal "null" strings
+        val userHandle = if (!responseObj.isNull("userHandle")) {
+            responseObj.optString("userHandle", "").takeIf { it.isNotEmpty() }?.let { CryptoUtils.decodeBase64Url(it) }
+        } else {
+            null
+        }
+
         return Ctap2Response.GetAssertionResponse(
             credentialId = credentialId,
             authenticatorData = CryptoUtils.decodeBase64Url(responseObj.getString("authenticatorData")),
             signature = CryptoUtils.decodeBase64Url(responseObj.getString("signature")),
-            userHandle = responseObj.optString("userHandle", null)?.takeIf { it.isNotEmpty() }?.let { CryptoUtils.decodeBase64Url(it) }
+            userHandle = userHandle
         )
     }
 

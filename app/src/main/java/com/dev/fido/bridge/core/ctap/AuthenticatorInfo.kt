@@ -38,7 +38,8 @@ object AuthenticatorInfo {
             if (info.pinUvAuthProtocols.isNotEmpty()) {
                 put(6L, info.pinUvAuthProtocols.map { it.toLong() })
             }
-            put(9L, listOf("internal", "hybrid"))
+            // Advertise both hardware security key and platform transports so relying parties permit subsequent direct USB/NFC or hybrid authentication
+            put(9L, listOf("usb", "nfc", "internal", "hybrid"))
         }
     }
 }
