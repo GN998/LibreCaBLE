@@ -23,9 +23,10 @@ object HybridQrParser {
 
             val cborMap = CtapCodec.SimpleCbor.read(cborBytes) as? Map<*, *> ?: return null
 
-            // Query Long keys directly since SimpleCbor always deserializes unsigned integers as Long
+            // Query Long keys directly since SimpleCbor always deserializes unsigned integers as Long.
+            // Enforce exact 16-byte QR secret length per CTAP 2.3 §11.5.1.1 (publicKey is validated during SEC1 decompression).
             val publicKey = cborMap[0L] as? ByteArray ?: return null
-            val secret = cborMap[1L] as? ByteArray ?: return null
+            val secret = (cborMap[1L] as? ByteArray)?.takeIf { it.size == 16 } ?: return null
 
             // Extract optional epoch seconds (Key 3) and flow hint (Key 5) per CTAP 2.3 §11.5.1.1
             val timestampSeconds = (cborMap[3L] as? Long)?.takeIf { it > 0L }

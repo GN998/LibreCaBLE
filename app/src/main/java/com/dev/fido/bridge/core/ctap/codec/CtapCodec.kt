@@ -307,7 +307,8 @@ object CtapCodec {
                             (readByte().toLong() shl 16) or
                             (readByte().toLong() shl 8) or
                             readByte().toLong()
-                        if (majorType != 7 && v in 0L until 0x100000000L) {
+                        // Reject non-canonical (< 2^32) and MSB-overflowing (< 0L) 8-byte integers per CTAP 2.3 §8 and RFC 8949 §3.1
+                        if (majorType != 7 && v < 0x100000000L) {
                             throw CtapCodecException(CtapStatus.ERR_INVALID_CBOR, "Non-canonical 8-byte CBOR integer encoding")
                         }
                         v

@@ -80,7 +80,9 @@ class TunnelWebsocket(
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
-                Log.w("TunnelWebsocket", "Received unsupported text frame, dropping.")
+                // Reject non-binary WebSocket frames per CTAP 2.3 §11.5.1.1.1; lifecycle callbacks handle cleanup
+                Log.w("TunnelWebsocket", "Received unsupported text frame, closing connection.")
+                webSocket.close(1003, "Binary frames required")
             }
 
             override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {

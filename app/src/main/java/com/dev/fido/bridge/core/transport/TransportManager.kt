@@ -137,7 +137,8 @@ class TransportManager(
                         onStatusUpdate?.invoke(msg)
                     } else {
                         val decrypted = noiseSession.decrypt(encryptedFrame)
-                        if (decrypted.isEmpty()) return@TunnelWebsocket
+                        // Treat empty post-handshake frames as a protocol error per CTAP 2.3 §11.5.1.2
+                        require(decrypted.isNotEmpty()) { "Empty transport frame is a protocol error" }
 
                         val frameType = decrypted[0].toInt() and 0xFF
                         when (frameType) {
