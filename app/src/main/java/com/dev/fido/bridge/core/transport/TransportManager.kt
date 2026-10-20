@@ -76,6 +76,14 @@ class TransportManager(
                 length = 16
             )
 
+            // Pre-derive the 64-byte EID key before connecting so BLE advertising can start immediately upon receiving the routing ID
+            val eidKey = CryptoHelper.endif(
+                ikm = psk,
+                salt = ByteArray(0),
+                info = byteArrayOf(1, 0, 0, 0),
+                length = 64
+            )
+
             ensureActive()
 
             lateinit var sessionWs: TunnelWebsocket
@@ -88,18 +96,20 @@ class TransportManager(
                     // 1. Generate the single 16-byte advertPlaintext seed (containing nonce, routingId, domainId)
                     val advertPlaintext = CryptoHelper.generateSeed(routingId, domainId)
 
-                    // 2. Derive 64-byte eidKey from qrSecret (psk)
-                    val eidKey = CryptoHelper.endif(
-                        ikm = psk,
-                        salt = ByteArray(0),
-                        info = byteArrayOf(1, 0, 0, 0),
-                        length = 64
-                    )
-
-                    // 3. Encrypt the EXACT advertPlaintext seed to 20-byte BLE EID
+                    // 2. Encrypt the EXACT advertPlaintext seed to 20-byte BLE EID using pre-derived eidKey
                     val finalEid = CryptoHelper.generateEid(eidKey, advertPlaintext)
 
-                    // 4. Derive 32-byte Noise PSK using the EXACT same advertPlaintext
+                    // 3. Start BLE advertising immediately before deriving Noise keys or generating P-256 keypairs, and abort the tunnel if the radio is unavailable
+                    if (!bleAdvertiser.startAdvertising(finalEid)) {
+                        onStatusUpdate?.invoke("Error: Failed to start BLE advertising.")
+                        sessionWs.close()
+                        tunnelWebsocket = null
+                        onSessionTerminated?.invoke()
+                        return@TunnelWebsocket
+                    }
+                    onStatusUpdate?.invoke("BLE Advertising Started with 20-byte EID...")
+
+                    // 4. Derive 32-byte Noise PSK using the EXACT same advertPlaintext while BLE radio is already broadcasting
                     val noisePsk = CryptoHelper.endif(
                         ikm = psk,
                         salt = advertPlaintext,
@@ -109,10 +119,6 @@ class TransportManager(
 
                     // 5. Initialize Noise KNpsk0 state machine with derived noisePsk
                     noiseSession.initializeHandshake(noisePsk)
-
-                    // 6. Start BLE advertising with finalEid
-                    bleAdvertiser.startAdvertising(finalEid)
-                    onStatusUpdate?.invoke("BLE Advertising Started with 20-byte EID...")
 
                     // Enforce a 60-second handshake deadline to reclaim the WebSocket and URI guard if a scanned QR code is stale
                     handshakeTimeoutJob?.cancel()

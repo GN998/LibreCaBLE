@@ -178,7 +178,8 @@ class FidoUriHandlerActivity : AppCompatActivity() {
     private fun initializeController() {
         if (::sessionController.isInitialized) return
 
-        val hybridBleAdvertiser = HybridBleAdvertiser(bluetoothAdapter?.bluetoothLeAdvertiser)
+        // Supply advertiser via lambda so enabling Bluetooth after a cold start yields a valid instance on subsequent scans
+        val hybridBleAdvertiser = HybridBleAdvertiser { bluetoothAdapter?.bluetoothLeAdvertiser }
         val transportManager = TransportManager(hybridBleAdvertiser)
 
         sessionController = BridgeSessionController(this, transportManager).apply {
