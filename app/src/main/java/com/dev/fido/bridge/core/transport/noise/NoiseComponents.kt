@@ -2,6 +2,7 @@ package com.dev.fido.bridge.core.transport.noise
 
 import com.dev.fido.bridge.core.security.toFixedLengthBytes
 import java.math.BigInteger
+import java.security.AlgorithmParameters
 import java.security.GeneralSecurityException
 import java.security.KeyFactory
 import java.security.KeyPairGenerator
@@ -28,12 +29,11 @@ const val EC_ALGORITHM = "EC"
 object CryptoHelper {
     private val secureRandom = SecureRandom()
 
-    // Cache P-256 curve parameters once to avoid expensive dummy keypair generation on every ECDH/decompression call
+    // Resolve P-256 curve parameters via AlgorithmParameters to avoid generating a throwaway keypair and consuming entropy on cold start
     private val secp256r1Params: ECParameterSpec by lazy {
-        val kpg = KeyPairGenerator.getInstance(EC_ALGORITHM).apply {
-            initialize(ECGenParameterSpec("secp256r1"))
-        }
-        (kpg.generateKeyPair().public as ECPublicKey).params
+        AlgorithmParameters.getInstance(EC_ALGORITHM).apply {
+            init(ECGenParameterSpec("secp256r1"))
+        }.getParameterSpec(ECParameterSpec::class.java)
     }
 
     /**

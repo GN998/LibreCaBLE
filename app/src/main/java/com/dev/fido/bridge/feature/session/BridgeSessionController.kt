@@ -52,8 +52,8 @@ class BridgeSessionController(
                 // Rethrow cancellation exceptions to respect structured concurrency lifecycles
                 throw e
             } catch (e: CtapCodecException) {
-                // Preserve specific CTAP status code (e.g., ERR_INVALID_COMMAND vs ERR_INVALID_CBOR)
-                Log.e("SessionController", "CTAP codec exception: 0x${"%02X".format(e.statusCode)}", e)
+                // Log protocol-level command or CBOR rejections as warnings without stack traces since client probes are expected
+                Log.w("SessionController", "Rejected CTAP request with status 0x${"%02X".format(e.statusCode)}: ${e.message}")
                 byteArrayOf(e.statusCode)
             } catch (e: Exception) {
                 Log.e("SessionController", "Unhandled exception during CTAP processing", e)

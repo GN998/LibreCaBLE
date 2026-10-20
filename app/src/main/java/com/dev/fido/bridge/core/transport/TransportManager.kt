@@ -56,180 +56,195 @@ class TransportManager(
         // from a prior scan before starting a new hybrid transport session.
         stopSession()
 
-        val uncompressedPeerKey = CryptoHelper.decompressECKey(peerPublicKey)
-        noiseSession.setPeerPublicKey(uncompressedPeerKey)
+        // Offload session setup from the UI thread while validating and setting the peer public key
+        // prior to opening the WebSocket to prevent race conditions with onConnected and avoid socket leaks.
+        transportScope.launch {
+            try {
+                val uncompressedPeerKey = CryptoHelper.decompressECKey(peerPublicKey)
+                noiseSession.setPeerPublicKey(uncompressedPeerKey)
+            } catch (e: Exception) {
+                Log.e("TransportManager", "Invalid peer public key", e)
+                onStatusUpdate?.invoke("Error: ${e.message}")
+                onSessionTerminated?.invoke()
+                return@launch
+            }
 
-        val ephemeralTunnelId = CryptoHelper.endif(
-            ikm = psk,
-            salt = ByteArray(0),
-            info = byteArrayOf(2, 0, 0, 0),
-            length = 16
-        )
+            val ephemeralTunnelId = CryptoHelper.endif(
+                ikm = psk,
+                salt = ByteArray(0),
+                info = byteArrayOf(2, 0, 0, 0),
+                length = 16
+            )
 
-        lateinit var sessionWs: TunnelWebsocket
-        sessionWs = TunnelWebsocket(
-            domainId = domainId,
-            ephemeralTunnelId = ephemeralTunnelId,
-            onConnected = { routingId ->
-                if (tunnelWebsocket !== sessionWs) return@TunnelWebsocket
+            ensureActive()
 
-                // 1. Generate the single 16-byte advertPlaintext seed (containing nonce, routingId, domainId)
-                val advertPlaintext = CryptoHelper.generateSeed(routingId, domainId)
+            lateinit var sessionWs: TunnelWebsocket
+            sessionWs = TunnelWebsocket(
+                domainId = domainId,
+                ephemeralTunnelId = ephemeralTunnelId,
+                onConnected = { routingId ->
+                    if (tunnelWebsocket !== sessionWs) return@TunnelWebsocket
 
-                // 2. Derive 64-byte eidKey from qrSecret (psk)
-                val eidKey = CryptoHelper.endif(
-                    ikm = psk,
-                    salt = ByteArray(0),
-                    info = byteArrayOf(1, 0, 0, 0),
-                    length = 64
-                )
+                    // 1. Generate the single 16-byte advertPlaintext seed (containing nonce, routingId, domainId)
+                    val advertPlaintext = CryptoHelper.generateSeed(routingId, domainId)
 
-                // 3. Encrypt the EXACT advertPlaintext seed to 20-byte BLE EID
-                val finalEid = CryptoHelper.generateEid(eidKey, advertPlaintext)
+                    // 2. Derive 64-byte eidKey from qrSecret (psk)
+                    val eidKey = CryptoHelper.endif(
+                        ikm = psk,
+                        salt = ByteArray(0),
+                        info = byteArrayOf(1, 0, 0, 0),
+                        length = 64
+                    )
 
-                // 4. Derive 32-byte Noise PSK using the EXACT same advertPlaintext
-                val noisePsk = CryptoHelper.endif(
-                    ikm = psk,
-                    salt = advertPlaintext,
-                    info = byteArrayOf(3, 0, 0, 0),
-                    length = 32
-                )
+                    // 3. Encrypt the EXACT advertPlaintext seed to 20-byte BLE EID
+                    val finalEid = CryptoHelper.generateEid(eidKey, advertPlaintext)
 
-                // 5. Initialize Noise KNpsk0 state machine with derived noisePsk
-                noiseSession.initializeHandshake(noisePsk)
+                    // 4. Derive 32-byte Noise PSK using the EXACT same advertPlaintext
+                    val noisePsk = CryptoHelper.endif(
+                        ikm = psk,
+                        salt = advertPlaintext,
+                        info = byteArrayOf(3, 0, 0, 0),
+                        length = 32
+                    )
 
-                // 6. Start BLE advertising with finalEid
-                bleAdvertiser.startAdvertising(finalEid)
-                onStatusUpdate?.invoke("BLE Advertising Started with 20-byte EID...")
+                    // 5. Initialize Noise KNpsk0 state machine with derived noisePsk
+                    noiseSession.initializeHandshake(noisePsk)
 
-                // Enforce a 60-second handshake deadline to reclaim the WebSocket and URI guard if a scanned QR code is stale
-                handshakeTimeoutJob?.cancel()
-                handshakeTimeoutJob = transportScope.launch {
-                    delay(60_000)
-                    if (tunnelWebsocket === sessionWs && !noiseSession.isHandshakeComplete) {
-                        Log.w("TransportManager", "Handshake timed out waiting for ClientHello; closing session.")
-                        onStatusUpdate?.invoke("Handshake timed out. Please scan the QR code again.")
+                    // 6. Start BLE advertising with finalEid
+                    bleAdvertiser.startAdvertising(finalEid)
+                    onStatusUpdate?.invoke("BLE Advertising Started with 20-byte EID...")
+
+                    // Enforce a 60-second handshake deadline to reclaim the WebSocket and URI guard if a scanned QR code is stale
+                    handshakeTimeoutJob?.cancel()
+                    handshakeTimeoutJob = transportScope.launch {
+                        delay(60_000)
+                        if (tunnelWebsocket === sessionWs && !noiseSession.isHandshakeComplete) {
+                            Log.w("TransportManager", "Handshake timed out waiting for ClientHello; closing session.")
+                            onStatusUpdate?.invoke("Handshake timed out. Please scan the QR code again.")
+                            bleAdvertiser.stopAdvertising()
+                            sessionWs.close()
+                            tunnelWebsocket = null
+                            onSessionTerminated?.invoke()
+                        }
+                    }
+                },
+                onMessageReceived = { encryptedFrame ->
+                    if (tunnelWebsocket !== sessionWs) return@TunnelWebsocket
+                    try {
+                        if (!noiseSession.isHandshakeComplete) {
+                            Log.d("TransportManager", "Received ClientHello, processing Noise KNpsk0 handshake...")
+                            // Cancel the handshake watchdog and stop BLE proximity advertising once the peer responds
+                            handshakeTimeoutJob?.cancel()
+                            bleAdvertiser.stopAdvertising()
+
+                            val serverHello = noiseSession.processClientHelloAndGenerateServerHello(encryptedFrame)
+                            val encryptedPostHandshake = noiseSession.encrypt(CACHED_POST_HANDSHAKE_MSG)
+
+                            // Enqueue ServerHello and Post-Handshake frames back-to-back before UI dispatch to minimize round-trip latency
+                            sessionWs.sendFrame(serverHello)
+                            sessionWs.sendFrame(encryptedPostHandshake)
+
+                            val msg = "Noise KNpsk0 Handshake Success!\nSent Post-Handshake Message."
+                            Log.d("TransportManager", msg)
+                            onStatusUpdate?.invoke(msg)
+                        } else {
+                            val decrypted = noiseSession.decrypt(encryptedFrame)
+                            // Treat empty post-handshake frames as a protocol error per CTAP 2.3 §11.5.1.2
+                            require(decrypted.isNotEmpty()) { "Empty transport frame is a protocol error" }
+
+                            val frameType = decrypted[0].toInt() and 0xFF
+                            when (frameType) {
+                                0x01 -> {
+                                    val ctapReq = decrypted.copyOfRange(1, decrypted.size)
+                                    // Avoid coercing empty CTAP payloads into a fake 0x00 command byte so logs reflect actual wire data
+                                    val commandByte = ctapReq.firstOrNull()
+                                    val cmdLabel = commandByte?.let { "0x%02X".format(it) } ?: "EMPTY"
+                                    val logMsg = "Received CTAP Request ($cmdLabel)!"
+                                    Log.d("TransportManager", logMsg)
+                                    onStatusUpdate?.invoke(logMsg)
+
+                                    // Dispatch CTAP request asynchronously so WebSocket reader thread remains responsive
+                                    transportScope.launch {
+                                        try {
+                                            val response = onRequestReceived(ctapReq)
+                                            // Ensure coroutine was not cancelled and session was not replaced while awaiting UI prompt
+                                            ensureActive()
+                                            if (tunnelWebsocket !== sessionWs) return@launch
+
+                                            val framedResponse = byteArrayOf(0x01) + response
+                                            sessionWs.sendFrame(noiseSession.encrypt(framedResponse))
+
+                                            // Notify UI when MakeCredential (0x01) or GetAssertion (0x02) transaction completes.
+                                            // Defer onSessionTerminated until peer sends 0x00 Shutdown or closes WebSocket
+                                            // so activeFidoUri remains guarded while the tunnel is still open.
+                                            if (commandByte == 0x01.toByte() || commandByte == 0x02.toByte()) {
+                                                val statusByte = response[0]
+                                                if (statusByte == CtapStatus.SUCCESS) {
+                                                    onStatusUpdate?.invoke("CTAP Transaction Complete.")
+                                                } else {
+                                                    onStatusUpdate?.invoke("CTAP Rejected (Status: 0x${"%02X".format(statusByte)}).")
+                                                }
+                                            }
+                                        } catch (e: CancellationException) {
+                                            throw e
+                                        } catch (e: Exception) {
+                                            Log.e("TransportManager", "Error processing CTAP request", e)
+                                            onStatusUpdate?.invoke("CTAP Error: ${e.message}")
+                                            // Close the underlying WebSocket on fatal CTAP dispatch errors to prevent orphaned keep-alive pings
+                                            sessionWs.close()
+                                            if (tunnelWebsocket === sessionWs) {
+                                                tunnelWebsocket = null
+                                            }
+                                            onSessionTerminated?.invoke()
+                                        }
+                                    }
+                                }
+                                0x00 -> {
+                                    // Close session cleanly upon receiving client shutdown message (typeShutdown = 0) per CTAP 2.3 §11.5
+                                    Log.d("TransportManager", "Received Shutdown message (0x00), closing tunnel.")
+                                    onStatusUpdate?.invoke("Peer closed connection. Session complete.")
+                                    bleAdvertiser.stopAdvertising()
+                                    sessionWs.close()
+                                    if (tunnelWebsocket === sessionWs) {
+                                        tunnelWebsocket = null
+                                    }
+                                    onSessionTerminated?.invoke()
+                                }
+                                else -> Log.d("TransportManager", "Received Unknown Frame Type: 0x${frameType.toString(16)}")
+                            }
+                        }
+                    } catch (e: Exception) {
+                        val msg = "Frame Error: ${e.message}"
+                        Log.e("TransportManager", msg, e)
+                        handshakeTimeoutJob?.cancel()
                         bleAdvertiser.stopAdvertising()
+                        // Close the WebSocket when handshake or frame decryption fails so the tunnel does not remain open indefinitely
                         sessionWs.close()
+                        if (tunnelWebsocket === sessionWs) {
+                            tunnelWebsocket = null
+                        }
+                        onStatusUpdate?.invoke(msg)
+                        onSessionTerminated?.invoke()
+                    }
+                },
+                onStatusUpdate = { status ->
+                    if (tunnelWebsocket === sessionWs) {
+                        onStatusUpdate?.invoke(status)
+                    }
+                },
+                onDisconnected = {
+                    // Stop BLE advertising and reset session guard via explicit disconnect callback instead of log string matching
+                    if (tunnelWebsocket === sessionWs) {
+                        handshakeTimeoutJob?.cancel()
+                        bleAdvertiser.stopAdvertising()
                         tunnelWebsocket = null
                         onSessionTerminated?.invoke()
                     }
                 }
-            },
-            onMessageReceived = { encryptedFrame ->
-                if (tunnelWebsocket !== sessionWs) return@TunnelWebsocket
-                try {
-                    if (!noiseSession.isHandshakeComplete) {
-                        Log.d("TransportManager", "Received ClientHello, processing Noise KNpsk0 handshake...")
-                        // Cancel the handshake watchdog and stop BLE proximity advertising once the peer responds
-                        handshakeTimeoutJob?.cancel()
-                        bleAdvertiser.stopAdvertising()
-
-                        val serverHello = noiseSession.processClientHelloAndGenerateServerHello(encryptedFrame)
-                        val encryptedPostHandshake = noiseSession.encrypt(CACHED_POST_HANDSHAKE_MSG)
-
-                        // Enqueue ServerHello and Post-Handshake frames back-to-back before UI dispatch to minimize round-trip latency
-                        sessionWs.sendFrame(serverHello)
-                        sessionWs.sendFrame(encryptedPostHandshake)
-
-                        val msg = "Noise KNpsk0 Handshake Success!\nSent Post-Handshake Message."
-                        Log.d("TransportManager", msg)
-                        onStatusUpdate?.invoke(msg)
-                    } else {
-                        val decrypted = noiseSession.decrypt(encryptedFrame)
-                        // Treat empty post-handshake frames as a protocol error per CTAP 2.3 §11.5.1.2
-                        require(decrypted.isNotEmpty()) { "Empty transport frame is a protocol error" }
-
-                        val frameType = decrypted[0].toInt() and 0xFF
-                        when (frameType) {
-                            0x01 -> {
-                                val ctapReq = decrypted.copyOfRange(1, decrypted.size)
-                                val commandByte = if (ctapReq.isNotEmpty()) ctapReq[0] else 0x00.toByte()
-                                val logMsg = "Received CTAP Request (0x${"%02X".format(commandByte)})!"
-                                Log.d("TransportManager", logMsg)
-                                onStatusUpdate?.invoke(logMsg)
-
-                                // Dispatch CTAP request asynchronously so WebSocket reader thread remains responsive
-                                transportScope.launch {
-                                    try {
-                                        val response = onRequestReceived(ctapReq)
-                                        // Ensure coroutine was not cancelled and session was not replaced while awaiting UI prompt
-                                        ensureActive()
-                                        if (tunnelWebsocket !== sessionWs) return@launch
-
-                                        val framedResponse = byteArrayOf(0x01) + response
-                                        sessionWs.sendFrame(noiseSession.encrypt(framedResponse))
-
-                                        // Notify UI when MakeCredential (0x01) or GetAssertion (0x02) transaction completes.
-                                        // Defer onSessionTerminated until peer sends 0x00 Shutdown or closes WebSocket
-                                        // so activeFidoUri remains guarded while the tunnel is still open.
-                                        if (commandByte == 0x01.toByte() || commandByte == 0x02.toByte()) {
-                                            val statusByte = response[0]
-                                            if (statusByte == CtapStatus.SUCCESS) {
-                                                onStatusUpdate?.invoke("CTAP Transaction Complete.")
-                                            } else {
-                                                onStatusUpdate?.invoke("CTAP Rejected (Status: 0x${"%02X".format(statusByte)}).")
-                                            }
-                                        }
-                                    } catch (e: CancellationException) {
-                                        throw e
-                                    } catch (e: Exception) {
-                                        Log.e("TransportManager", "Error processing CTAP request", e)
-                                        onStatusUpdate?.invoke("CTAP Error: ${e.message}")
-                                        // Close the underlying WebSocket on fatal CTAP dispatch errors to prevent orphaned keep-alive pings
-                                        sessionWs.close()
-                                        if (tunnelWebsocket === sessionWs) {
-                                            tunnelWebsocket = null
-                                        }
-                                        onSessionTerminated?.invoke()
-                                    }
-                                }
-                            }
-                            0x00 -> {
-                                // Close session cleanly upon receiving client shutdown message (typeShutdown = 0) per CTAP 2.3 §11.5
-                                Log.d("TransportManager", "Received Shutdown message (0x00), closing tunnel.")
-                                onStatusUpdate?.invoke("Peer closed connection. Session complete.")
-                                bleAdvertiser.stopAdvertising()
-                                sessionWs.close()
-                                if (tunnelWebsocket === sessionWs) {
-                                    tunnelWebsocket = null
-                                }
-                                onSessionTerminated?.invoke()
-                            }
-                            else -> Log.d("TransportManager", "Received Unknown Frame Type: 0x${frameType.toString(16)}")
-                        }
-                    }
-                } catch (e: Exception) {
-                    val msg = "Frame Error: ${e.message}"
-                    Log.e("TransportManager", msg, e)
-                    handshakeTimeoutJob?.cancel()
-                    bleAdvertiser.stopAdvertising()
-                    // Close the WebSocket when handshake or frame decryption fails so the tunnel does not remain open indefinitely
-                    sessionWs.close()
-                    if (tunnelWebsocket === sessionWs) {
-                        tunnelWebsocket = null
-                    }
-                    onStatusUpdate?.invoke(msg)
-                    onSessionTerminated?.invoke()
-                }
-            },
-            onStatusUpdate = { status ->
-                if (tunnelWebsocket === sessionWs) {
-                    onStatusUpdate?.invoke(status)
-                }
-            },
-            onDisconnected = {
-                // Stop BLE advertising and reset session guard via explicit disconnect callback instead of log string matching
-                if (tunnelWebsocket === sessionWs) {
-                    handshakeTimeoutJob?.cancel()
-                    bleAdvertiser.stopAdvertising()
-                    tunnelWebsocket = null
-                    onSessionTerminated?.invoke()
-                }
-            }
-        )
-        tunnelWebsocket = sessionWs
-        sessionWs.connect()
+            )
+            tunnelWebsocket = sessionWs
+            sessionWs.connect()
+        }
     }
 
     fun stopSession() {
