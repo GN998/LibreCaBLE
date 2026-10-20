@@ -106,7 +106,7 @@ class FidoUriHandlerActivity : AppCompatActivity() {
         val inputField = EditText(this).apply {
             inputType = InputType.TYPE_CLASS_NUMBER
             filters = arrayOf(InputFilter.LengthFilter(5))
-            hint = "256 - 65535"
+            hint = "0 or 256 - 65535"
             if (customId != null) {
                 setText(customId.toString())
                 setSelection(text.length)
@@ -132,7 +132,7 @@ class FidoUriHandlerActivity : AppCompatActivity() {
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
                 val parsed = inputField.text.toString().trim().toIntOrNull()
                 if (parsed == null || !TunnelConfigManager.isValidTunnelId(parsed)) {
-                    inputField.error = "Enter a number between 256 and 65535"
+                    inputField.error = "Enter 0 or a number between 256 and 65535"
                 } else {
                     TunnelConfigManager.setCustomTunnelId(parsed)
                     Toast.makeText(this, "Custom configuration saved (applies on next scan)", Toast.LENGTH_SHORT).show()

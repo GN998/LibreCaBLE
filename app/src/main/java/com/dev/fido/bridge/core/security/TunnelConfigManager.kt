@@ -34,7 +34,8 @@ object TunnelConfigManager {
         return if (isValidTunnelId(value)) value else null
     }
 
-    fun isValidTunnelId(id: Int): Boolean = id in MIN_TUNNEL_ID..MAX_TUNNEL_ID
+    // Permit assigned domain 0 (Google) and hashed domains (256..65535) while blocking unallocated assigned IDs (1..255) that peers reject
+    fun isValidTunnelId(id: Int): Boolean = id == 0 || id in MIN_TUNNEL_ID..MAX_TUNNEL_ID
 
     fun setCustomTunnelId(id: Int) {
         prefs.edit().putInt(KEY_CUSTOM_TUNNEL_ID, id).apply()
