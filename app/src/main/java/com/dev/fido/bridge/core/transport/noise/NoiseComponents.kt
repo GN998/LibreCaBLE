@@ -37,6 +37,13 @@ object CryptoHelper {
     }
 
     /**
+     * Trigger lazy initialization of P-256 curve parameters and JCA providers during application startup.
+     */
+    fun warmup() {
+        secp256r1Params
+    }
+
+    /**
      * Generate an ephemeral P-256 key pair reusing cached curve parameters.
      */
     fun generateEcKeyPair(): Pair<ECPublicKey, ECPrivateKey> {
@@ -158,24 +165,18 @@ object CryptoHelper {
         }
     }
 
-    fun endif(ikm: ByteArray, salt: ByteArray, info: ByteArray, length: Int): ByteArray {
-        val prk = hkdfExtract(salt, ikm)
-        return endifExpand(prk, info, length)
-    }
-
     /**
-     * Compute RFC 5869 HKDF-Extract PRK shared by caBLE key derivation and Noise chaining key updates.
+     * Compute RFC 5869 HKDF-Extract and HKDF-Expand reusing a single Mac instance to halve JCA provider lookups.
      */
-    fun hkdfExtract(salt: ByteArray, ikm: ByteArray): ByteArray {
+    fun endif(ikm: ByteArray, salt: ByteArray, info: ByteArray, length: Int): ByteArray {
+        val mac = Mac.getInstance(HKDF_ALGORITHM)
         val s = if (salt.isEmpty()) ByteArray(32) else salt
-        val mac = Mac.getInstance(HKDF_ALGORITHM).apply { init(SecretKeySpec(s, HKDF_ALGORITHM)) }
-        return mac.doFinal(ikm)
-    }
+        mac.init(SecretKeySpec(s, HKDF_ALGORITHM))
+        val prk = mac.doFinal(ikm)
 
-    private fun endifExpand(prk: ByteArray, info: ByteArray, length: Int): ByteArray {
         val glen = 32
         val rounds = ceil(length / glen.toDouble()).toInt()
-        val mac = Mac.getInstance(HKDF_ALGORITHM).apply { init(SecretKeySpec(prk, HKDF_ALGORITHM)) }
+        mac.init(SecretKeySpec(prk, HKDF_ALGORITHM))
 
         val out = ByteArray(length)
         var prev = ByteArray(0)
@@ -193,16 +194,16 @@ object CryptoHelper {
 }
 
 class NoiseHandshakeState {
+    // Reuse a single SHA-256 MessageDigest instance across all mixHash calls within the handshake session
+    private val sha256 = MessageDigest.getInstance("SHA-256")
     // Initialize 32-byte Noise protocol name buffer for QR-initiated KNpsk0 handshakes per CTAP 2.3 §11.5.1.2
     private var handshakeHash: ByteArray = "Noise_KNpsk0_P256_AESGCM_SHA256".toByteArray(Charsets.US_ASCII).copyOf(32)
     private var chainingKey: ByteArray = handshakeHash.copyOf()
     private var cipherKey: ByteArray? = null
 
     fun mixHash(data: ByteArray) {
-        handshakeHash = MessageDigest.getInstance("SHA-256").run {
-            update(handshakeHash)
-            digest(data)
-        }
+        sha256.update(handshakeHash)
+        handshakeHash = sha256.digest(data)
     }
 
     fun mixKey(inputKeyMaterial: ByteArray) {

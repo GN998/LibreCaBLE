@@ -61,7 +61,7 @@ class TransportManager(
         transportScope.launch {
             try {
                 val uncompressedPeerKey = CryptoHelper.decompressECKey(peerPublicKey)
-                noiseSession.setPeerPublicKey(uncompressedPeerKey)
+                noiseSession.prepareSession(uncompressedPeerKey)
             } catch (e: Exception) {
                 Log.e("TransportManager", "Invalid peer public key", e)
                 onStatusUpdate?.invoke("Error: ${e.message}")

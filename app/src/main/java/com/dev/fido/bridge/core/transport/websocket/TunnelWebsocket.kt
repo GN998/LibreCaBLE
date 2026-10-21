@@ -4,6 +4,10 @@ import android.util.Log
 import com.dev.fido.bridge.core.security.DomainDerivation
 import com.dev.fido.bridge.core.security.hexToByteArray
 import com.dev.fido.bridge.core.security.toHex
+import com.dev.fido.bridge.core.transport.noise.CryptoHelper
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -22,15 +26,29 @@ class TunnelWebsocket(
     private val onDisconnected: (() -> Unit)? = null
 ) {
     companion object {
-        // Share a single OkHttpClient instance across sessions to reuse connection pools and thread dispatchers.
+        // Initialize OkHttpClient lazily so referencing the companion object in Application.onCreate()
+        // does not synchronously load the system X509TrustManager and SSLContext on the main thread.
         // Disable read timeout and use a 5-second ping interval to prevent aggressive OEM background freezing
         // or NAT idle drops while the user interacts with external credential manager UIs.
-        private val sharedClient: OkHttpClient = OkHttpClient.Builder()
-            .connectTimeout(30, TimeUnit.SECONDS)
-            .readTimeout(0, TimeUnit.SECONDS)
-            .writeTimeout(30, TimeUnit.SECONDS)
-            .pingInterval(5, TimeUnit.SECONDS)
-            .build()
+        private val sharedClient: OkHttpClient by lazy {
+            OkHttpClient.Builder()
+                .connectTimeout(30, TimeUnit.SECONDS)
+                .readTimeout(0, TimeUnit.SECONDS)
+                .writeTimeout(30, TimeUnit.SECONDS)
+                .pingInterval(5, TimeUnit.SECONDS)
+                .build()
+        }
+
+        /**
+         * Pre-initialize the OkHttp TLS engine and JCA P-256 curve parameters on a background IO thread
+         * during cold start to eliminate classloading and trust-store overhead without blocking the main thread.
+         */
+        fun warmupLocalCryptoAndTls() {
+            CoroutineScope(Dispatchers.IO).launch {
+                sharedClient
+                CryptoHelper.warmup()
+            }
+        }
     }
 
     private var webSocket: WebSocket? = null

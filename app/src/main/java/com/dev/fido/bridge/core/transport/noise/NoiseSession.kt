@@ -14,16 +14,25 @@ class NoiseSession {
     private lateinit var ephPriv: ECPrivateKey
     private lateinit var phoneEphemeralPubKey: ByteArray
 
-    // Inject the PC's public key (scanned from QR)
+    /**
+     * Set the PC's static public key and pre-generate the local ephemeral P-256 keypair
+     * before awaiting the WebSocket handshake so onConnected remains free of key-generation latency.
+     */
     @Synchronized
-    fun setPeerPublicKey(keyBytes: ByteArray) {
+    fun prepareSession(keyBytes: ByteArray) {
         this.peerPublicKeyBytes = keyBytes
+        isHandshakeComplete = false
+        crypter = null
+
+        val (pub, priv) = CryptoHelper.generateEcKeyPair()
+        ephPriv = priv
+        phoneEphemeralPubKey = CryptoHelper.uncompressECKey(pub)
     }
 
     // Step 1: Initialize the noise state machine with derived PSK
     @Synchronized
     fun initializeHandshake(psk: ByteArray) {
-        check(::peerPublicKeyBytes.isInitialized) { "Peer public key not set" }
+        check(::peerPublicKeyBytes.isInitialized) { "Session not prepared" }
         // Reset handshake flag and session crypter so subsequent QR scans on a singleTop Activity
         // process the new ClientHello instead of treating it as post-handshake ciphertext.
         isHandshakeComplete = false
@@ -35,11 +44,6 @@ class NoiseSession {
         nh.mixHash(byteArrayOf(1))
         nh.mixHash(peerPublicKeyBytes)
         nh.mixKeyAndHash(psk)
-
-        // Pre-compute ephemeral P-256 keypair during BLE advertising idle window to minimize ClientHello response latency
-        val (pub, priv) = CryptoHelper.generateEcKeyPair()
-        ephPriv = priv
-        phoneEphemeralPubKey = CryptoHelper.uncompressECKey(pub)
 
         Log.d("NoiseSession", "Noise KNpsk0 initialized with derived PSK, waiting for ClientHello")
     }
