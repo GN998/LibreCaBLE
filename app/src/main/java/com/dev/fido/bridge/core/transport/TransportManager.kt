@@ -180,13 +180,16 @@ class TransportManager(
                                             val framedResponse = byteArrayOf(0x01) + response
                                             sessionWs.sendFrame(noiseSession.encrypt(framedResponse))
 
-                                            // Notify UI when MakeCredential (0x01) or GetAssertion (0x02) transaction completes.
-                                            // Defer onSessionTerminated until peer sends 0x00 Shutdown or closes WebSocket
-                                            // so activeFidoUri remains guarded while the tunnel is still open.
+                                            // Close the tunnel cleanly after a successful MakeCredential (0x01) or GetAssertion (0x02)
+                                            // ceremony. OkHttp's RealWebSocket flushes all prior sendFrame messages before transmitting
+                                            // the 1000 Close frame, preventing trailing 0x00 client probes and background keep-alive leaks.
                                             if (commandByte == 0x01.toByte() || commandByte == 0x02.toByte()) {
                                                 val statusByte = response[0]
                                                 if (statusByte == CtapStatus.SUCCESS) {
                                                     onStatusUpdate?.invoke("CTAP Transaction Complete.")
+                                                    tunnelWebsocket = null
+                                                    sessionWs.close()
+                                                    onSessionTerminated?.invoke()
                                                 } else {
                                                     onStatusUpdate?.invoke("CTAP Rejected (Status: 0x${"%02X".format(statusByte)}).")
                                                 }
