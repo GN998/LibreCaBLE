@@ -19,7 +19,7 @@ class HybridBleAdvertiser(private val advertiserProvider: () -> BluetoothLeAdver
      * Synchronize access across OkHttp reader, coroutine timeout, and Android main threads to prevent leaked advertising state.
      */
     @Synchronized
-    fun startAdvertising(eid: ByteArray): Boolean {
+    fun startAdvertising(eid: ByteArray, onFailure: ((Int) -> Unit)? = null): Boolean {
         // Stop any active advertising before starting a new session
         stopAdvertising()
 
@@ -52,6 +52,19 @@ class HybridBleAdvertiser(private val advertiserProvider: () -> BluetoothLeAdver
 
             override fun onStartFailure(errorCode: Int) {
                 Log.e("HybridBleAdvertiser", "EID BLE Advertising failed with errorCode: $errorCode")
+                // Clear activeCallback under monitor lock only if this callback is still current,
+                // then notify caller outside the lock to abort the awaiting tunnel session.
+                val shouldNotify = synchronized(this@HybridBleAdvertiser) {
+                    if (activeCallback === this) {
+                        activeCallback = null
+                        true
+                    } else {
+                        false
+                    }
+                }
+                if (shouldNotify) {
+                    onFailure?.invoke(errorCode)
+                }
             }
         }
 

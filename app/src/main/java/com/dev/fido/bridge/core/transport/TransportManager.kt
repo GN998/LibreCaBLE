@@ -101,7 +101,18 @@ class TransportManager(
                     val finalEid = CryptoHelper.generateEid(eidKey, advertPlaintext)
 
                     // 3. Start BLE advertising immediately before deriving Noise keys or generating P-256 keypairs, and abort the tunnel if the radio is unavailable
-                    if (!bleAdvertiser.startAdvertising(finalEid)) {
+                    val bleDispatched = bleAdvertiser.startAdvertising(finalEid) { errorCode ->
+                        // Handle asynchronous BLE start failures (e.g., ADVERTISE_FAILED_TOO_MANY_ADVERTISERS)
+                        // delivered on the main looper so the tunnel does not hang until the 60s watchdog expires.
+                        if (tunnelWebsocket === sessionWs) {
+                            handshakeTimeoutJob?.cancel()
+                            tunnelWebsocket = null
+                            sessionWs.close()
+                            onStatusUpdate?.invoke("Error: BLE advertising failed (code $errorCode).")
+                            onSessionTerminated?.invoke()
+                        }
+                    }
+                    if (!bleDispatched) {
                         onStatusUpdate?.invoke("Error: Failed to start BLE advertising.")
                         sessionWs.close()
                         tunnelWebsocket = null

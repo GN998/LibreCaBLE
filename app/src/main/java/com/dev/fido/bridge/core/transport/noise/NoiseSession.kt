@@ -83,6 +83,8 @@ class NoiseSession {
 
         val (rx, tx) = nh.splitSessionKeys()
         crypter = NoiseCrypter(rx, tx)
+        // Release ephemeral handshake state and intermediate chaining keys once transport keys are split
+        noiseState = null
         isHandshakeComplete = true
 
         Log.d("NoiseSession", "Processed ClientHello, generated ServerHello. Handshake complete.")

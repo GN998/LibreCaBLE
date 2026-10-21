@@ -31,6 +31,10 @@ class BridgeSessionController(
         psk: ByteArray,
         domainId: Int
     ) {
+        // Terminate any prior transport session first, then cancel pending Main-thread dispatches
+        // so no background callback from a previous scan can enqueue after cancelChildren().
+        stopSession()
+
         transportManager.onStatusUpdate = { status ->
             scope.launch { onStatusUpdate?.invoke(status) }
         }
