@@ -35,7 +35,6 @@ class TransportManager(
         }
     }
 
-    private val noiseSession = NoiseSession()
     @Volatile
     private var tunnelWebsocket: TunnelWebsocket? = null
     private val transportScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
@@ -59,9 +58,11 @@ class TransportManager(
         // Offload session setup from the UI thread while validating and setting the peer public key
         // prior to opening the WebSocket to prevent race conditions with onConnected and avoid socket leaks.
         transportScope.launch {
+            // Instantiate a dedicated NoiseSession per transport session to prevent cross-session state races on rapid re-scans
+            val sessionNoise = NoiseSession()
             try {
                 val uncompressedPeerKey = CryptoHelper.decompressECKey(peerPublicKey)
-                noiseSession.prepareSession(uncompressedPeerKey)
+                sessionNoise.prepareSession(uncompressedPeerKey)
             } catch (e: Exception) {
                 Log.e("TransportManager", "Invalid peer public key", e)
                 onStatusUpdate?.invoke("Error: ${e.message}")
@@ -118,13 +119,13 @@ class TransportManager(
                     )
 
                     // 5. Initialize Noise KNpsk0 state machine with derived noisePsk
-                    noiseSession.initializeHandshake(noisePsk)
+                    sessionNoise.initializeHandshake(noisePsk)
 
                     // Enforce a 60-second handshake deadline to reclaim the WebSocket and URI guard if a scanned QR code is stale
                     handshakeTimeoutJob?.cancel()
                     handshakeTimeoutJob = transportScope.launch {
                         delay(60_000)
-                        if (tunnelWebsocket === sessionWs && !noiseSession.isHandshakeComplete) {
+                        if (tunnelWebsocket === sessionWs && !sessionNoise.isHandshakeComplete) {
                             Log.w("TransportManager", "Handshake timed out waiting for ClientHello; closing session.")
                             onStatusUpdate?.invoke("Handshake timed out. Please scan the QR code again.")
                             bleAdvertiser.stopAdvertising()
@@ -137,14 +138,14 @@ class TransportManager(
                 onMessageReceived = { encryptedFrame ->
                     if (tunnelWebsocket !== sessionWs) return@TunnelWebsocket
                     try {
-                        if (!noiseSession.isHandshakeComplete) {
+                        if (!sessionNoise.isHandshakeComplete) {
                             Log.d("TransportManager", "Received ClientHello, processing Noise KNpsk0 handshake...")
                             // Cancel the handshake watchdog and stop BLE proximity advertising once the peer responds
                             handshakeTimeoutJob?.cancel()
                             bleAdvertiser.stopAdvertising()
 
-                            val serverHello = noiseSession.processClientHelloAndGenerateServerHello(encryptedFrame)
-                            val encryptedPostHandshake = noiseSession.encrypt(CACHED_POST_HANDSHAKE_MSG)
+                            val serverHello = sessionNoise.processClientHelloAndGenerateServerHello(encryptedFrame)
+                            val encryptedPostHandshake = sessionNoise.encrypt(CACHED_POST_HANDSHAKE_MSG)
 
                             // Enqueue ServerHello and Post-Handshake frames back-to-back before UI dispatch to minimize round-trip latency
                             sessionWs.sendFrame(serverHello)
@@ -154,7 +155,7 @@ class TransportManager(
                             Log.d("TransportManager", msg)
                             onStatusUpdate?.invoke(msg)
                         } else {
-                            val decrypted = noiseSession.decrypt(encryptedFrame)
+                            val decrypted = sessionNoise.decrypt(encryptedFrame)
                             // Treat empty post-handshake frames as a protocol error per CTAP 2.3 §11.5.1.2
                             require(decrypted.isNotEmpty()) { "Empty transport frame is a protocol error" }
 
@@ -178,7 +179,7 @@ class TransportManager(
                                             if (tunnelWebsocket !== sessionWs) return@launch
 
                                             val framedResponse = byteArrayOf(0x01) + response
-                                            sessionWs.sendFrame(noiseSession.encrypt(framedResponse))
+                                            sessionWs.sendFrame(sessionNoise.encrypt(framedResponse))
 
                                             // Close the tunnel cleanly after a successful MakeCredential (0x01) or GetAssertion (0x02)
                                             // ceremony. OkHttp's RealWebSocket flushes all prior sendFrame messages before transmitting
