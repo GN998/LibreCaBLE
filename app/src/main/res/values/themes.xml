@@ -1,5 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Inherit from AppCompat DayNight with native ActionBar to host menu actions without Material3 overhead -->
-    <style name="Theme.PasskeyBridge" parent="Theme.AppCompat.DayNight" />
+    <!-- Use dark AppCompat theme with native ActionBar to match terminal UI without Material3 overhead -->
+    <style name="Theme.PasskeyBridge" parent="Theme.AppCompat">
+        <item name="colorPrimary">#0F172A</item>
+        <item name="colorPrimaryDark">#020617</item>
+        <item name="colorAccent">@android:color/system_accent1_300</item>
+        <item name="android:windowBackground">#020617</item>
+    </style>
 </resources>

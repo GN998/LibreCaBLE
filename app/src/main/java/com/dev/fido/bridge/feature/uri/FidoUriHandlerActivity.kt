@@ -6,6 +6,9 @@ import android.bluetooth.BluetoothManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Color
+import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.text.InputFilter
 import android.text.InputType
@@ -13,7 +16,9 @@ import android.util.Log
 import android.view.Menu
 import android.view.MenuItem
 import android.widget.EditText
+import android.widget.FrameLayout
 import android.widget.LinearLayout
+import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
@@ -43,27 +48,52 @@ class FidoUriHandlerActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Delegate title and settings button to the native ActionBar and inset status text below system bars on Android 15+
+        val density = resources.displayMetrics.density
+        val padCard = (20 * density).toInt()
+        val padOuter = (16 * density).toInt()
+
+        // Style status output as a monospace terminal card using framework Monet accent border without XML inflation overhead
         tv = TextView(this).apply {
             text = "Processing FIDO URI..."
-            textSize = 18f
+            textSize = 14f
+            typeface = Typeface.MONOSPACE
+            setTextColor(Color.parseColor("#E2E8F0"))
+            setLineSpacing(6 * density, 1.1f)
+            setPadding(padCard, padCard, padCard, padCard)
+            background = GradientDrawable().apply {
+                setColor(Color.parseColor("#0F172A"))
+                cornerRadius = 14 * density
+                setStroke((1 * density).toInt().coerceAtLeast(1), getColor(android.R.color.system_accent1_400) and 0x55FFFFFF)
+            }
+        }
+
+        // Wrap terminal view in a ScrollView to keep long CTAP handshake logs accessible on small screens
+        val scrollContainer = ScrollView(this).apply {
+            clipToPadding = false
+            addView(
+                tv,
+                FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.WRAP_CONTENT
+                )
+            )
         }
 
         // Apply system bar and display cutout insets dynamically so content is never obscured under Android 15+ forced edge-to-edge
-        ViewCompat.setOnApplyWindowInsetsListener(tv) { view, windowInsets ->
+        ViewCompat.setOnApplyWindowInsetsListener(scrollContainer) { view, windowInsets ->
             val insets = windowInsets.getInsets(
                 WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout()
             )
             view.setPadding(
-                insets.left + 50,
-                insets.top + 40,
-                insets.right + 50,
-                insets.bottom
+                insets.left + padOuter,
+                insets.top + padOuter,
+                insets.right + padOuter,
+                insets.bottom + padOuter
             )
             windowInsets
         }
 
-        setContentView(tv)
+        setContentView(scrollContainer)
 
         checkAndRequestPermissions()
     }
@@ -90,17 +120,23 @@ class FidoUriHandlerActivity : AppCompatActivity() {
      */
     private fun showTunnelSettingsDialog() {
         val customId = TunnelConfigManager.getCustomTunnelId()
+        val density = resources.displayMetrics.density
+        val padH = (24 * density).toInt()
+        val padTop = (16 * density).toInt()
+        val padBottom = (4 * density).toInt()
+        val padStatusBottom = (8 * density).toInt()
 
         val container = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(60, 40, 60, 10)
+            // Scale dialog content padding by screen density so layout proportions remain consistent across DPIs
+            setPadding(padH, padTop, padH, padBottom)
         }
 
         val statusView = TextView(this).apply {
             // Conceal build-time default ID to prevent reverse-deriving the default tunnel domain
             text = if (customId != null) "Custom configuration active" else "Currently using default configuration"
             textSize = 14f
-            setPadding(0, 0, 0, 20)
+            setPadding(0, 0, 0, padStatusBottom)
         }
 
         val inputField = EditText(this).apply {
