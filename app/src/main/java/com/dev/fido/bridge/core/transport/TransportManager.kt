@@ -38,6 +38,7 @@ class TransportManager(
     @Volatile
     private var tunnelWebsocket: TunnelWebsocket? = null
     private val transportScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    @Volatile
     private var handshakeTimeoutJob: Job? = null
 
     var onStatusUpdate: ((String) -> Unit)? = null
@@ -84,8 +85,6 @@ class TransportManager(
                 info = byteArrayOf(1, 0, 0, 0),
                 length = 64
             )
-
-            ensureActive()
 
             lateinit var sessionWs: TunnelWebsocket
             sessionWs = TunnelWebsocket(
@@ -263,11 +262,17 @@ class TransportManager(
                     }
                 }
             )
-            tunnelWebsocket = sessionWs
-            sessionWs.connect()
+            // Guard WebSocket assignment and connection against concurrent stopSession() calls on the main thread
+            // so a cancelled setup coroutine cannot escape teardown and leak a background socket.
+            synchronized(this@TransportManager) {
+                ensureActive()
+                tunnelWebsocket = sessionWs
+                sessionWs.connect()
+            }
         }
     }
 
+    @Synchronized
     fun stopSession() {
         handshakeTimeoutJob?.cancel()
         handshakeTimeoutJob = null
