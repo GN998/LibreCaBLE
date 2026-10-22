@@ -102,7 +102,8 @@ class FidoUriHandlerActivity : AppCompatActivity() {
 
             scrollContainer.isFillViewport = true
             scrollContainer.setBackgroundColor(Color.parseColor("#88000000"))
-            scrollContainer.setOnClickListener { finish() }
+            // Remove the transient QR task from Recents on scrim dismissal to prevent system re-creation with stale FIDO URIs
+            scrollContainer.setOnClickListener { finishAndRemoveTask() }
 
             val r = 24.dp.toFloat()
             tv.apply {
@@ -253,7 +254,8 @@ class FidoUriHandlerActivity : AppCompatActivity() {
         sessionController = BridgeSessionController(this, TransportManager(hybridBleAdvertiser)).apply {
             onStatusUpdate = { status ->
                 if (isQrScanMode && status == "CTAP Transaction Complete.") {
-                    finish()
+                    // Evict the completed QR scan task from Recents so switching apps cannot replay the consumed FIDO intent
+                    finishAndRemoveTask()
                 } else {
                     updateStatus(status)
                 }

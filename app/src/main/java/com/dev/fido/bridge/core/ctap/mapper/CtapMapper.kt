@@ -108,8 +108,8 @@ object CtapMapper {
         val responseObj = JSONObject(jsonResponseStr).getJSONObject("response")
         val attestationObjectBytes = CryptoUtils.decodeBase64Url(responseObj.getString("attestationObject"))
 
-        // Decode and validate CBOR attestationObject fields without unsafe casts
-        val map = CtapCodec.SimpleCbor.read(attestationObjectBytes) as? Map<*, *>
+        // Decode provider-generated WebAuthn attestationObject using non-strict RFC 8949 rules before canonical CTAP2 re-encoding
+        val map = CtapCodec.SimpleCbor.read(attestationObjectBytes, strict = false) as? Map<*, *>
             ?: throw CtapCodecException(CtapStatus.ERR_INVALID_CBOR, "attestationObject must be a CBOR map")
 
         return Ctap2Response.MakeCredentialResponse(

@@ -17,6 +17,7 @@ import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
+import java.util.concurrent.atomic.AtomicBoolean
 
 class TransportManager(
     private val bleAdvertiser: HybridBleAdvertiser
@@ -74,8 +75,9 @@ class TransportManager(
         // Offload session setup from the UI thread while validating and setting the peer public key
         // prior to opening the WebSocket to prevent race conditions with onConnected and avoid socket leaks.
         transportScope.launch {
-            // Instantiate a dedicated NoiseSession per transport session to prevent cross-session state races on rapid re-scans
+            // Instantiate a dedicated NoiseSession and busy guard per transport session to prevent cross-session state races
             val sessionNoise = NoiseSession()
+            val isProcessingCtap = AtomicBoolean(false)
             try {
                 val uncompressedPeerKey = CryptoHelper.decompressECKey(peerPublicKey)
                 sessionNoise.prepareSession(uncompressedPeerKey)
@@ -192,6 +194,13 @@ class TransportManager(
                             val frameType = decrypted[0].toInt() and 0xFF
                             when (frameType) {
                                 0x01 -> {
+                                    // Reject overlapping CTAP commands with ERR_CHANNEL_BUSY (0x06) per CTAP 2.3 §6 to prevent concurrent UI prompts
+                                    if (!isProcessingCtap.compareAndSet(false, true)) {
+                                        Log.w("TransportManager", "Channel busy; rejecting concurrent CTAP request with 0x06")
+                                        sessionWs.sendFrame(sessionNoise.encrypt(byteArrayOf(0x01, CtapStatus.ERR_CHANNEL_BUSY)))
+                                        return@TunnelWebsocket
+                                    }
+
                                     val ctapReq = decrypted.copyOfRange(1, decrypted.size)
                                     // Avoid coercing empty CTAP payloads into a fake 0x00 command byte so logs reflect actual wire data
                                     val commandByte = ctapReq.firstOrNull()
@@ -235,17 +244,20 @@ class TransportManager(
                                             clearActiveSession(sessionWs)
                                             sessionWs.close()
                                             onSessionTerminated?.invoke()
+                                        } finally {
+                                            isProcessingCtap.set(false)
                                         }
                                     }
                                 }
                                 0x00 -> {
                                     // Close session cleanly upon receiving client shutdown message (typeShutdown = 0) per CTAP 2.3 §11.5
                                     Log.d("TransportManager", "Received Shutdown message (0x00), closing tunnel.")
-                                    onStatusUpdate?.invoke("Peer closed connection. Session complete.")
                                     bleAdvertiser.stopAdvertising()
-                                    clearActiveSession(sessionWs)
-                                    sessionWs.close()
-                                    onSessionTerminated?.invoke()
+                                    if (clearActiveSession(sessionWs)) {
+                                        onStatusUpdate?.invoke("CTAP Transaction Complete.")
+                                        sessionWs.close()
+                                        onSessionTerminated?.invoke()
+                                    }
                                 }
                                 else -> Log.d("TransportManager", "Received Unknown Frame Type: 0x${frameType.toString(16)}")
                             }

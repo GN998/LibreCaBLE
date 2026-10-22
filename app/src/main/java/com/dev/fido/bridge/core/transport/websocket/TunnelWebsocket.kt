@@ -28,11 +28,11 @@ class TunnelWebsocket(
     companion object {
         // Initialize OkHttpClient lazily so referencing the companion object in Application.onCreate()
         // does not synchronously load the system X509TrustManager and SSLContext on the main thread.
-        // Disable read timeout and use a 5-second ping interval to prevent aggressive OEM background freezing
-        // or NAT idle drops while the user interacts with external credential manager UIs.
+        // Tighten connectTimeout to 10s so OkHttp 4.x route fallback recovers faster when a dual-stack
+        // IPv6 route is unreachable, while keeping readTimeout(0) and 5s pings for background survival.
         private val sharedClient: OkHttpClient by lazy {
             OkHttpClient.Builder()
-                .connectTimeout(30, TimeUnit.SECONDS)
+                .connectTimeout(10, TimeUnit.SECONDS)
                 .readTimeout(0, TimeUnit.SECONDS)
                 .writeTimeout(30, TimeUnit.SECONDS)
                 .pingInterval(5, TimeUnit.SECONDS)

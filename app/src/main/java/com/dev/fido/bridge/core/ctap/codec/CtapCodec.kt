@@ -244,10 +244,16 @@ object CtapCodec {
 
     // A lightweight, dependency-free CBOR encoder/decoder optimized for FIDO structures
     object SimpleCbor {
-        fun read(bytes: ByteArray): Any? {
+        /**
+         * Decode CBOR byte stream into Kotlin primitives and collections.
+         * Enforce strict CTAP 2.3 §8 canonical constraints by default, while allowing relaxed RFC 8949
+         * decoding when parsing internal WebAuthn attestationObjects returned by Android credential providers.
+         */
+        fun read(bytes: ByteArray, strict: Boolean = true): Any? {
             if (bytes.isEmpty()) {
                 throw CtapCodecException(CtapStatus.ERR_INVALID_CBOR, "Empty CBOR byte stream")
             }
+            val maxDepth = if (strict) 4 else 8
             var pos = 0
             fun readByte(): Int {
                 if (pos >= bytes.size) throw CtapCodecException(CtapStatus.ERR_INVALID_CBOR, "Unexpected end of CBOR stream")
@@ -269,27 +275,27 @@ object CtapCodec {
                 return res
             }
             fun readItem(depth: Int): Any? {
-                // Enforce CTAP 2.3 §8 maximum CBOR nesting depth of 4 levels for maps/arrays
-                if (depth > 4) {
-                    throw CtapCodecException(CtapStatus.ERR_INVALID_CBOR, "CBOR nesting depth exceeds CTAP2 limit of 4")
+                // Enforce CTAP 2.3 §8 maximum CBOR nesting depth of 4 levels for wire commands, or 8 for internal attestation statements
+                if (depth > maxDepth) {
+                    throw CtapCodecException(CtapStatus.ERR_INVALID_CBOR, "CBOR nesting depth exceeds limit of $maxDepth")
                 }
                 val b = readByte()
                 val majorType = b shr 5
                 val info = b and 0x1F
 
-                // Decode unsigned argument and enforce CTAP 2.3 §8 canonical minimal-length integer encoding
+                // Decode unsigned argument and enforce CTAP 2.3 §8 canonical minimal-length integer encoding when strict
                 val value: Long = when {
                     info < 24 -> info.toLong()
                     info == 24 -> {
                         val v = readByte().toLong()
-                        if (majorType != 7 && v < 24L) {
+                        if (strict && majorType != 7 && v < 24L) {
                             throw CtapCodecException(CtapStatus.ERR_INVALID_CBOR, "Non-canonical 1-byte CBOR integer encoding")
                         }
                         v
                     }
                     info == 25 -> {
                         val v = ((readByte() shl 8) or readByte()).toLong()
-                        if (majorType != 7 && v < 0x100L) {
+                        if (strict && majorType != 7 && v < 0x100L) {
                             throw CtapCodecException(CtapStatus.ERR_INVALID_CBOR, "Non-canonical 2-byte CBOR integer encoding")
                         }
                         v
@@ -297,7 +303,7 @@ object CtapCodec {
                     info == 26 -> {
                         val i = (readByte() shl 24) or (readByte() shl 16) or (readByte() shl 8) or readByte()
                         val v = i.toLong() and 0xFFFFFFFFL
-                        if (majorType != 7 && v < 0x10000L) {
+                        if (strict && majorType != 7 && v < 0x10000L) {
                             throw CtapCodecException(CtapStatus.ERR_INVALID_CBOR, "Non-canonical 4-byte CBOR integer encoding")
                         }
                         v
@@ -311,8 +317,8 @@ object CtapCodec {
                             (readByte().toLong() shl 16) or
                             (readByte().toLong() shl 8) or
                             readByte().toLong()
-                        // Reject non-canonical (< 2^32) and MSB-overflowing (< 0L) 8-byte integers per CTAP 2.3 §8 and RFC 8949 §3.1
-                        if (majorType != 7 && v < 0x100000000L) {
+                        // Reject MSB-overflowing (< 0L) 8-byte integers, and reject non-canonical (< 2^32) encodings when strict per CTAP 2.3 §8
+                        if (majorType != 7 && (v < 0L || (strict && v < 0x100000000L))) {
                             throw CtapCodecException(CtapStatus.ERR_INVALID_CBOR, "Non-canonical 8-byte CBOR integer encoding")
                         }
                         v
