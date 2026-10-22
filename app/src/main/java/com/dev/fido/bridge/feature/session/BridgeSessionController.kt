@@ -1,6 +1,7 @@
 package com.dev.fido.bridge.feature.session
 
 import android.content.Context
+import android.content.Intent
 import android.util.Log
 import com.dev.fido.bridge.core.ctap.codec.CtapCodec
 import com.dev.fido.bridge.core.ctap.codec.CtapCodecException
@@ -16,12 +17,13 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 class BridgeSessionController(
-    context: Context,
+    private val context: Context,
     // Require non-null TransportManager to eliminate redundant safe-call operators
     private val transportManager: TransportManager
 ) {
     private val proxy = CredentialManagerProxy(context)
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+    private val serviceIntent = Intent(context, BridgeForegroundService::class.java)
 
     var onStatusUpdate: ((String) -> Unit)? = null
     var onSessionTerminated: (() -> Unit)? = null
@@ -39,6 +41,7 @@ class BridgeSessionController(
             scope.launch { onStatusUpdate?.invoke(status) }
         }
         transportManager.onSessionTerminated = {
+            context.stopService(serviceIntent)
             scope.launch { onSessionTerminated?.invoke() }
         }
 
@@ -64,6 +67,9 @@ class BridgeSessionController(
                 byteArrayOf(CtapStatus.ERR_OPERATION_DENIED)
             }
         }
+
+        // Elevate process priority after dispatching I/O setup so opaque credential provider or lock pattern UIs do not freeze the WebSocket
+        context.startForegroundService(serviceIntent)
     }
 
     // Detach transport callbacks before tearing down the session so closing sockets cannot enqueue stale termination events
@@ -71,6 +77,7 @@ class BridgeSessionController(
         transportManager.onStatusUpdate = null
         transportManager.onSessionTerminated = null
         transportManager.stopSession()
+        context.stopService(serviceIntent)
         scope.coroutineContext.cancelChildren()
     }
 }
