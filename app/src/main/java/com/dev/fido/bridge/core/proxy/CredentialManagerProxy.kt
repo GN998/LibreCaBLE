@@ -9,7 +9,6 @@ import androidx.credentials.GetCredentialRequest
 import androidx.credentials.GetPublicKeyCredentialOption
 import androidx.credentials.PublicKeyCredential
 import androidx.credentials.exceptions.NoCredentialException
-import androidx.credentials.exceptions.domerrors.DomError
 import androidx.credentials.exceptions.domerrors.InvalidStateError
 import androidx.credentials.exceptions.domerrors.NotSupportedError
 import androidx.credentials.exceptions.publickeycredential.CreatePublicKeyCredentialDomException
@@ -113,17 +112,18 @@ class CredentialManagerProxy(private val context: Context) {
         Ctap2Response.ErrorResponse(mapExceptionToCtapStatus(e))
     }
 
-    // Map Android CredentialManager exceptions to accurate CTAP2 status codes across both registration and assertion flows
+    // Map Android CredentialManager exceptions to accurate CTAP2 status codes while restricting ERR_CREDENTIAL_EXCLUDED (0x19) to MakeCredential per CTAP 2.3 §6.1-6.2
     private fun mapExceptionToCtapStatus(e: Exception): Byte = when (e) {
         is NoCredentialException -> CtapStatus.ERR_NO_CREDENTIALS
-        is CreatePublicKeyCredentialDomException -> mapDomErrorToCtapStatus(e.domError)
-        is GetPublicKeyCredentialDomException -> mapDomErrorToCtapStatus(e.domError)
-        else -> CtapStatus.ERR_OPERATION_DENIED
-    }
-
-    private fun mapDomErrorToCtapStatus(domError: DomError): Byte = when (domError) {
-        is InvalidStateError -> CtapStatus.ERR_CREDENTIAL_EXCLUDED
-        is NotSupportedError -> CtapStatus.ERR_UNSUPPORTED_ALGORITHM
+        is CreatePublicKeyCredentialDomException -> when (e.domError) {
+            is InvalidStateError -> CtapStatus.ERR_CREDENTIAL_EXCLUDED
+            is NotSupportedError -> CtapStatus.ERR_UNSUPPORTED_ALGORITHM
+            else -> CtapStatus.ERR_OPERATION_DENIED
+        }
+        is GetPublicKeyCredentialDomException -> when (e.domError) {
+            is NotSupportedError -> CtapStatus.ERR_UNSUPPORTED_ALGORITHM
+            else -> CtapStatus.ERR_OPERATION_DENIED
+        }
         else -> CtapStatus.ERR_OPERATION_DENIED
     }
 }

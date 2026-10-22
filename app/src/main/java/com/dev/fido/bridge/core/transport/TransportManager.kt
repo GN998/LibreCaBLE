@@ -42,8 +42,10 @@ class TransportManager(
     @Volatile
     private var handshakeTimeoutJob: Job? = null
 
+    @Volatile
     var onStatusUpdate: ((String) -> Unit)? = null
     // Notify controller when a transaction finishes or the tunnel closes to decouple control flow from log strings
+    @Volatile
     var onSessionTerminated: (() -> Unit)? = null
 
     /**
@@ -104,6 +106,15 @@ class TransportManager(
             )
 
             lateinit var sessionWs: TunnelWebsocket
+
+            // Synchronize frame encryption and WebSocket enqueueing under sessionNoise monitor to prevent
+            // out-of-order AES-GCM write nonces when reader-thread 0x06 busy replies race with IO-thread CTAP responses.
+            fun sendEncryptedFrame(plaintext: ByteArray) {
+                synchronized(sessionNoise) {
+                    sessionWs.sendFrame(sessionNoise.encrypt(plaintext))
+                }
+            }
+
             sessionWs = TunnelWebsocket(
                 domainId = domainId,
                 ephemeralTunnelId = ephemeralTunnelId,
@@ -169,19 +180,18 @@ class TransportManager(
                     try {
                         if (!sessionNoise.isHandshakeComplete) {
                             Log.d("TransportManager", "Received ClientHello, processing Noise KNpsk0 handshake...")
-                            // Cancel the handshake watchdog and stop BLE proximity advertising once the peer responds
+                            val serverHello = sessionNoise.processClientHelloAndGenerateServerHello(encryptedFrame)
+
+                            // Cancel the handshake watchdog and stop BLE proximity advertising after ClientHello is authenticated
                             synchronized(this@TransportManager) {
                                 handshakeTimeoutJob?.cancel()
                                 handshakeTimeoutJob = null
                             }
                             bleAdvertiser.stopAdvertising()
 
-                            val serverHello = sessionNoise.processClientHelloAndGenerateServerHello(encryptedFrame)
-                            val encryptedPostHandshake = sessionNoise.encrypt(CACHED_POST_HANDSHAKE_MSG)
-
                             // Enqueue ServerHello and Post-Handshake frames back-to-back before UI dispatch to minimize round-trip latency
                             sessionWs.sendFrame(serverHello)
-                            sessionWs.sendFrame(encryptedPostHandshake)
+                            sendEncryptedFrame(CACHED_POST_HANDSHAKE_MSG)
 
                             val msg = "Noise KNpsk0 Handshake Success!\nSent Post-Handshake Message."
                             Log.d("TransportManager", msg)
@@ -197,7 +207,7 @@ class TransportManager(
                                     // Reject overlapping CTAP commands with ERR_CHANNEL_BUSY (0x06) per CTAP 2.3 §6 to prevent concurrent UI prompts
                                     if (!isProcessingCtap.compareAndSet(false, true)) {
                                         Log.w("TransportManager", "Channel busy; rejecting concurrent CTAP request with 0x06")
-                                        sessionWs.sendFrame(sessionNoise.encrypt(byteArrayOf(0x01, CtapStatus.ERR_CHANNEL_BUSY)))
+                                        sendEncryptedFrame(byteArrayOf(0x01, CtapStatus.ERR_CHANNEL_BUSY))
                                         return@TunnelWebsocket
                                     }
 
@@ -218,7 +228,7 @@ class TransportManager(
                                             if (tunnelWebsocket !== sessionWs) return@launch
 
                                             val framedResponse = byteArrayOf(0x01) + response
-                                            sessionWs.sendFrame(sessionNoise.encrypt(framedResponse))
+                                            sendEncryptedFrame(framedResponse)
 
                                             // Close the tunnel cleanly after a successful MakeCredential (0x01) or GetAssertion (0x02)
                                             // ceremony. OkHttp's RealWebSocket flushes all prior sendFrame messages before transmitting

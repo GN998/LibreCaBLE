@@ -66,8 +66,10 @@ class BridgeSessionController(
         }
     }
 
-    // Release BLE advertising, WebSocket tunnel, and child coroutine jobs while keeping scope reusable
+    // Detach transport callbacks before tearing down the session so closing sockets cannot enqueue stale termination events
     fun stopSession() {
+        transportManager.onStatusUpdate = null
+        transportManager.onSessionTerminated = null
         transportManager.stopSession()
         scope.coroutineContext.cancelChildren()
     }
