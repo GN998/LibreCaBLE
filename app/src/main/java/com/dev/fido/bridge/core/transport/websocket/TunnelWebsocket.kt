@@ -145,4 +145,13 @@ class TunnelWebsocket(
         isClientClosed = true
         webSocket?.close(1000, "Closed by client")
     }
+
+    /**
+     * Immediately abort the underlying TCP/TLS call and release socket resources when tearing down
+     * an incomplete or superseded session where flushing outbound frames is not required.
+     */
+    fun cancel() {
+        isClientClosed = true
+        webSocket?.cancel()
+    }
 }

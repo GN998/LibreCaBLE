@@ -253,14 +253,15 @@ class FidoUriHandlerActivity : AppCompatActivity() {
         val hybridBleAdvertiser = HybridBleAdvertiser { bluetoothAdapter?.bluetoothLeAdvertiser }
         sessionController = BridgeSessionController(this, TransportManager(hybridBleAdvertiser)).apply {
             onStatusUpdate = { status ->
-                if (isQrScanMode && status == "CTAP Transaction Complete.") {
-                    // Evict the completed QR scan task from Recents so switching apps cannot replay the consumed FIDO intent
+                updateStatus(status)
+            }
+            onSessionTerminated = {
+                activeFidoUri = null
+                // Evict the QR scan task from Recents upon completion, cancellation, or error to return cleanly to the scanner
+                if (isQrScanMode) {
                     finishAndRemoveTask()
-                } else {
-                    updateStatus(status)
                 }
             }
-            onSessionTerminated = { activeFidoUri = null }
         }
     }
 

@@ -63,7 +63,8 @@ class TransportManager(
         }
     }
 
-    // Support suspending callback to prevent blocking OkHttp reader thread during UI credential prompts
+    // Synchronize session startup with stopSession() so rapid consecutive scans cancel prior setup coroutines before launching new ones
+    @Synchronized
     fun startSession(
         peerPublicKey: ByteArray,
         psk: ByteArray,
@@ -132,7 +133,7 @@ class TransportManager(
                         // Handle asynchronous BLE start failures (e.g., ADVERTISE_FAILED_TOO_MANY_ADVERTISERS)
                         // delivered on the main looper so the tunnel does not hang until the 60s watchdog expires.
                         if (clearActiveSession(sessionWs)) {
-                            sessionWs.close()
+                            sessionWs.cancel()
                             onStatusUpdate?.invoke("Error: BLE advertising failed (code $errorCode).")
                             onSessionTerminated?.invoke()
                         }
@@ -140,7 +141,7 @@ class TransportManager(
                     if (!bleDispatched) {
                         if (clearActiveSession(sessionWs)) {
                             onStatusUpdate?.invoke("Error: Failed to start BLE advertising.")
-                            sessionWs.close()
+                            sessionWs.cancel()
                             onSessionTerminated?.invoke()
                         }
                         return@TunnelWebsocket
@@ -168,7 +169,7 @@ class TransportManager(
                                     Log.w("TransportManager", "Handshake timed out waiting for ClientHello; closing session.")
                                     onStatusUpdate?.invoke("Handshake timed out. Please scan the QR code again.")
                                     bleAdvertiser.stopAdvertising()
-                                    sessionWs.close()
+                                    sessionWs.cancel()
                                     onSessionTerminated?.invoke()
                                 }
                             }
@@ -230,18 +231,28 @@ class TransportManager(
                                             val framedResponse = byteArrayOf(0x01) + response
                                             sendEncryptedFrame(framedResponse)
 
-                                            // Close the tunnel cleanly after a successful MakeCredential (0x01) or GetAssertion (0x02)
-                                            // ceremony. OkHttp's RealWebSocket flushes all prior sendFrame messages before transmitting
-                                            // the 1000 Close frame, preventing trailing 0x00 client probes and background keep-alive leaks.
+                                            // Close the tunnel cleanly after a MakeCredential (0x01) or GetAssertion (0x02) ceremony
+                                            // unless it was a silent pre-flight probe (up=false), where the client expects the tunnel
+                                            // to remain open for a subsequent interactive request per CTAP 2.3 §6.2.2.
                                             if (commandByte == 0x01.toByte() || commandByte == 0x02.toByte()) {
                                                 val statusByte = response[0]
-                                                if (statusByte == CtapStatus.SUCCESS) {
-                                                    if (clearActiveSession(sessionWs)) {
-                                                        onStatusUpdate?.invoke("CTAP Transaction Complete.")
-                                                        sessionWs.close()
-                                                        onSessionTerminated?.invoke()
+                                                val isSilentPreFlight = commandByte == 0x02.toByte() &&
+                                                    statusByte == CtapStatus.ERR_NO_CREDENTIALS &&
+                                                    runCatching {
+                                                        val req = CtapCodec.decodeRequest(ctapReq)
+                                                        req is com.dev.fido.bridge.core.ctap.model.Ctap2Request.GetAssertion && !req.userPresence
+                                                    }.getOrDefault(false)
+
+                                                if (!isSilentPreFlight && clearActiveSession(sessionWs)) {
+                                                    val msg = if (statusByte == CtapStatus.SUCCESS) {
+                                                        "CTAP Transaction Complete."
+                                                    } else {
+                                                        "CTAP Rejected (Status: 0x${"%02X".format(statusByte)})."
                                                     }
-                                                } else {
+                                                    onStatusUpdate?.invoke(msg)
+                                                    sessionWs.close()
+                                                    onSessionTerminated?.invoke()
+                                                } else if (statusByte != CtapStatus.SUCCESS) {
                                                     onStatusUpdate?.invoke("CTAP Rejected (Status: 0x${"%02X".format(statusByte)}).")
                                                 }
                                             }
@@ -250,10 +261,11 @@ class TransportManager(
                                         } catch (e: Exception) {
                                             Log.e("TransportManager", "Error processing CTAP request", e)
                                             onStatusUpdate?.invoke("CTAP Error: ${e.message}")
-                                            // Close the underlying WebSocket on fatal CTAP dispatch errors to prevent orphaned keep-alive pings
-                                            clearActiveSession(sessionWs)
-                                            sessionWs.close()
-                                            onSessionTerminated?.invoke()
+                                            // Cancel the underlying WebSocket on fatal CTAP dispatch errors to prevent orphaned keep-alive pings
+                                            if (clearActiveSession(sessionWs)) {
+                                                sessionWs.cancel()
+                                                onSessionTerminated?.invoke()
+                                            }
                                         } finally {
                                             isProcessingCtap.set(false)
                                         }
@@ -276,11 +288,12 @@ class TransportManager(
                         val msg = "Frame Error: ${e.message}"
                         Log.e("TransportManager", msg, e)
                         bleAdvertiser.stopAdvertising()
-                        // Close the WebSocket when handshake or frame decryption fails so the tunnel does not remain open indefinitely
-                        clearActiveSession(sessionWs)
-                        sessionWs.close()
-                        onStatusUpdate?.invoke(msg)
-                        onSessionTerminated?.invoke()
+                        // Cancel the WebSocket when handshake or frame decryption fails so the tunnel does not remain open indefinitely
+                        if (clearActiveSession(sessionWs)) {
+                            sessionWs.cancel()
+                            onStatusUpdate?.invoke(msg)
+                            onSessionTerminated?.invoke()
+                        }
                     }
                 },
                 onStatusUpdate = { status ->
@@ -312,7 +325,7 @@ class TransportManager(
         handshakeTimeoutJob = null
         transportScope.coroutineContext.cancelChildren()
         bleAdvertiser.stopAdvertising()
-        tunnelWebsocket?.close()
+        tunnelWebsocket?.cancel()
         tunnelWebsocket = null
     }
 }
