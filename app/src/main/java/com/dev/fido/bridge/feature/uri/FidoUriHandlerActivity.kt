@@ -13,6 +13,7 @@ import android.os.Bundle
 import android.text.InputFilter
 import android.text.InputType
 import android.util.Log
+import android.view.Gravity
 import android.view.Menu
 import android.view.MenuItem
 import android.widget.EditText
@@ -35,12 +36,17 @@ import com.dev.fido.bridge.feature.session.BridgeSessionController
 
 class FidoUriHandlerActivity : AppCompatActivity() {
 
+    private lateinit var scrollContainer: ScrollView
     private lateinit var tv: TextView
     private lateinit var sessionController: BridgeSessionController
     private val PERMISSION_REQUEST_CODE = 1001
 
     // Track active FIDO URI to prevent scanner apps from dispatching duplicate intents that cancel ongoing CredentialManager prompts
     private var activeFidoUri: String? = null
+    private var isQrScanMode: Boolean = false
+
+    private val Int.dp: Int
+        get() = (this * resources.displayMetrics.density).toInt()
 
     private val bluetoothAdapter: BluetoothAdapter?
         get() = (getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager)?.adapter
@@ -48,61 +54,113 @@ class FidoUriHandlerActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        val density = resources.displayMetrics.density
-        val padCard = (20 * density).toInt()
-        val padOuter = (16 * density).toInt()
-
-        // Style status output as a monospace terminal card using framework Monet accent border without XML inflation overhead
         tv = TextView(this).apply {
             text = "Processing FIDO URI..."
             textSize = 14f
             typeface = Typeface.MONOSPACE
             setTextColor(Color.parseColor("#E2E8F0"))
-            setLineSpacing(6 * density, 1.1f)
-            setPadding(padCard, padCard, padCard, padCard)
-            background = GradientDrawable().apply {
-                setColor(Color.parseColor("#0F172A"))
-                cornerRadius = 14 * density
-                setStroke((1 * density).toInt().coerceAtLeast(1), getColor(android.R.color.system_accent1_400) and 0x55FFFFFF)
-            }
         }
 
-        // Wrap terminal view in a ScrollView to keep long CTAP handshake logs accessible on small screens
-        val scrollContainer = ScrollView(this).apply {
+        scrollContainer = ScrollView(this).apply {
             clipToPadding = false
-            addView(
-                tv,
-                FrameLayout.LayoutParams(
-                    FrameLayout.LayoutParams.MATCH_PARENT,
-                    FrameLayout.LayoutParams.WRAP_CONTENT
-                )
-            )
+            addView(tv)
         }
 
-        // Apply system bar and display cutout insets dynamically so content is never obscured under Android 15+ forced edge-to-edge
+        // Reserve upper half of the active window as a dim scrim in QR mode while preserving system bar and cutout insets across both modes
         ViewCompat.setOnApplyWindowInsetsListener(scrollContainer) { view, windowInsets ->
             val insets = windowInsets.getInsets(
                 WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout()
             )
-            view.setPadding(
-                insets.left + padOuter,
-                insets.top + padOuter,
-                insets.right + padOuter,
-                insets.bottom + padOuter
-            )
+            val padCard = 20.dp
+            if (isQrScanMode) {
+                val windowHeight = windowManager.currentWindowMetrics.bounds.height()
+                view.setPadding(insets.left, windowHeight / 2, insets.right, 0)
+                tv.setPadding(padCard, padCard, padCard, padCard + insets.bottom)
+            } else {
+                val pad = 16.dp
+                view.setPadding(insets.left + pad, insets.top + pad, insets.right + pad, insets.bottom + pad)
+                tv.setPadding(padCard, padCard, padCard, padCard)
+            }
             windowInsets
         }
 
         setContentView(scrollContainer)
-
+        applyUiMode(intent?.dataString != null)
         checkAndRequestPermissions()
     }
 
-    // Mount settings trigger directly inside the native ActionBar so it aligns with the app title and avoids status bar overlap
-    override fun onCreateOptionsMenu(menu: Menu): Boolean {
-        menu.add(Menu.NONE, 1, Menu.NONE, "⚙").apply {
-            setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS)
+    /**
+     * Switch between full-screen terminal mode (launcher) and half-screen bottom-sheet mode (QR scan).
+     */
+    private fun applyUiMode(scanMode: Boolean) {
+        isQrScanMode = scanMode
+        val padCard = 20.dp
+
+        if (scanMode) {
+            setTranslucent(true)
+            supportActionBar?.hide()
+
+            scrollContainer.isFillViewport = true
+            scrollContainer.setBackgroundColor(Color.parseColor("#88000000"))
+            scrollContainer.setOnClickListener { finish() }
+
+            val r = 24.dp.toFloat()
+            tv.apply {
+                setOnClickListener { }
+                gravity = Gravity.CENTER
+                setLineSpacing(4.dp.toFloat(), 1.15f)
+                setPadding(padCard, padCard, padCard, padCard)
+                background = createCardBackground(floatArrayOf(r, r, r, r, 0f, 0f, 0f, 0f))
+                layoutParams = FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.MATCH_PARENT
+                )
+            }
+        } else {
+            setTranslucent(false)
+            supportActionBar?.show()
+
+            scrollContainer.isFillViewport = false
+            scrollContainer.setBackgroundColor(Color.parseColor("#020617"))
+            scrollContainer.setOnClickListener(null)
+            scrollContainer.setClickable(false)
+
+            val r = 14.dp.toFloat()
+            tv.apply {
+                setOnClickListener(null)
+                setClickable(false)
+                gravity = Gravity.START or Gravity.TOP
+                setLineSpacing(6.dp.toFloat(), 1.1f)
+                setPadding(padCard, padCard, padCard, padCard)
+                background = createCardBackground(FloatArray(8) { r })
+                layoutParams = FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.WRAP_CONTENT
+                )
+            }
         }
+        ViewCompat.requestApplyInsets(scrollContainer)
+    }
+
+    private fun createCardBackground(radii: FloatArray) = GradientDrawable().apply {
+        setColor(Color.parseColor("#0F172A"))
+        cornerRadii = radii
+        setStroke(1.dp.coerceAtLeast(1), getColor(android.R.color.system_accent1_400) and 0x55FFFFFF)
+    }
+
+    /**
+     * Overwrite centered status text on state changes in QR scan mode, or append multi-line logs in launcher mode.
+     */
+    private fun updateStatus(status: String, resetTerminal: Boolean = false) {
+        if (isQrScanMode) {
+            tv.text = status.lineSequence().map { it.trim() }.lastOrNull { it.isNotEmpty() } ?: status.trim()
+        } else {
+            if (resetTerminal) tv.text = status else tv.append("\n➜ $status")
+        }
+    }
+
+    override fun onCreateOptionsMenu(menu: Menu): Boolean {
+        menu.add(Menu.NONE, 1, Menu.NONE, "⚙").setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS)
         return true
     }
 
@@ -114,43 +172,28 @@ class FidoUriHandlerActivity : AppCompatActivity() {
         return super.onOptionsItemSelected(item)
     }
 
-    /**
-     * Present dialog to configure or clear custom tunnel domain ID.
-     * Apply changes on subsequent scans to avoid invalidating active BLE EID and Noise PSK state mid-handshake.
-     */
     private fun showTunnelSettingsDialog() {
         val customId = TunnelConfigManager.getCustomTunnelId()
-        val density = resources.displayMetrics.density
-        val padH = (24 * density).toInt()
-        val padTop = (16 * density).toInt()
-        val padBottom = (4 * density).toInt()
-        val padStatusBottom = (8 * density).toInt()
-
-        val container = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            // Scale dialog content padding by screen density so layout proportions remain consistent across DPIs
-            setPadding(padH, padTop, padH, padBottom)
-        }
-
         val statusView = TextView(this).apply {
-            // Conceal build-time default ID to prevent reverse-deriving the default tunnel domain
             text = if (customId != null) "Custom configuration active" else "Currently using default configuration"
             textSize = 14f
-            setPadding(0, 0, 0, padStatusBottom)
+            setPadding(0, 0, 0, 8.dp)
         }
-
         val inputField = EditText(this).apply {
             inputType = InputType.TYPE_CLASS_NUMBER
             filters = arrayOf(InputFilter.LengthFilter(5))
             hint = "0 or 256 - 65535"
-            if (customId != null) {
-                setText(customId.toString())
+            customId?.let {
+                setText(it.toString())
                 setSelection(text.length)
             }
         }
-
-        container.addView(statusView)
-        container.addView(inputField)
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(24.dp, 16.dp, 24.dp, 4.dp)
+            addView(statusView)
+            addView(inputField)
+        }
 
         val dialog = AlertDialog.Builder(this)
             .setTitle("Extended Domain Settings")
@@ -176,23 +219,15 @@ class FidoUriHandlerActivity : AppCompatActivity() {
                 }
             }
         }
-
         dialog.show()
     }
 
     private fun checkAndRequestPermissions() {
-        // Request only BLUETOOTH_ADVERTISE and BLUETOOTH_CONNECT on Android 14+ without legacy location permissions
-        val permissions = listOf(
-            Manifest.permission.BLUETOOTH_ADVERTISE,
-            Manifest.permission.BLUETOOTH_CONNECT
-        )
+        val missing = arrayOf(Manifest.permission.BLUETOOTH_ADVERTISE, Manifest.permission.BLUETOOTH_CONNECT)
+            .filter { ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED }
 
-        val missingPermissions = permissions.filter {
-            ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
-        }
-
-        if (missingPermissions.isNotEmpty()) {
-            ActivityCompat.requestPermissions(this, missingPermissions.toTypedArray(), PERMISSION_REQUEST_CODE)
+        if (missing.isNotEmpty()) {
+            ActivityCompat.requestPermissions(this, missing.toTypedArray(), PERMISSION_REQUEST_CODE)
         } else {
             initializeController()
             handleIntent(intent)
@@ -206,7 +241,7 @@ class FidoUriHandlerActivity : AppCompatActivity() {
                 initializeController()
                 handleIntent(intent)
             } else {
-                tv.text = "Bluetooth permissions are required for FIDO proximity verification."
+                updateStatus("Bluetooth permissions are required for FIDO proximity verification.", resetTerminal = true)
             }
         }
     }
@@ -214,93 +249,84 @@ class FidoUriHandlerActivity : AppCompatActivity() {
     private fun initializeController() {
         if (::sessionController.isInitialized) return
 
-        // Supply advertiser via lambda so enabling Bluetooth after a cold start yields a valid instance on subsequent scans
         val hybridBleAdvertiser = HybridBleAdvertiser { bluetoothAdapter?.bluetoothLeAdvertiser }
-        val transportManager = TransportManager(hybridBleAdvertiser)
-
-        sessionController = BridgeSessionController(this, transportManager).apply {
-            // Append background network and crypto status directly to UI TextView
+        sessionController = BridgeSessionController(this, TransportManager(hybridBleAdvertiser)).apply {
             onStatusUpdate = { status ->
-                tv.append("\n➜ $status")
+                if (isQrScanMode && status == "CTAP Transaction Complete.") {
+                    finish()
+                } else {
+                    updateStatus(status)
+                }
             }
-            // Reset active URI guard via explicit termination callback instead of fragile log prefix matching
-            onSessionTerminated = {
-                activeFidoUri = null
-            }
+            onSessionTerminated = { activeFidoUri = null }
         }
     }
 
     override fun onNewIntent(intent: Intent?) {
         super.onNewIntent(intent)
         setIntent(intent)
-        if (::sessionController.isInitialized) {
-            handleIntent(intent)
+        val hasUri = intent?.dataString != null
+        // Clean up any lingering QR scan session if the user relaunches the app from the home screen launcher icon
+        if (!hasUri && activeFidoUri != null) {
+            activeFidoUri = null
+            if (::sessionController.isInitialized) sessionController.stopSession()
         }
+        applyUiMode(hasUri)
+        if (::sessionController.isInitialized) handleIntent(intent)
     }
 
     private fun handleIntent(intent: Intent?) {
-        // Verify Bluetooth is enabled before starting a caBLE session so users are not stuck waiting on silent BLE failure
         val adapter = bluetoothAdapter
         if (adapter == null || !adapter.isEnabled) {
-            tv.text = "Bluetooth is turned off.\nPlease enable Bluetooth and scan the FIDO QR code again."
+            updateStatus("Bluetooth is turned off. Please enable Bluetooth and scan again.", resetTerminal = true)
             return
         }
 
         val uriString = intent?.dataString
-
         if (uriString != null) {
-            // Ignore duplicate intent deliveries of the exact same QR URI to avoid aborting an active CredentialManager prompt
             if (uriString == activeFidoUri) {
                 Log.d("FidoUriHandler", "Ignoring duplicate FIDO URI intent")
                 return
             }
             activeFidoUri = uriString
 
-            // Start status output directly from Parsing without exposing raw FIDO URI payload on screen
-            tv.text = "Parsing..."
             val qrData = HybridQrParser.parse(uriString)
+            if (qrData == null) {
+                activeFidoUri = null
+                updateStatus("Invalid or unsupported FIDO URI.", resetTerminal = true)
+                return
+            }
 
-            if (qrData != null) {
-                tv.append("\nParsed successfully. Routing to CTAP Dispatcher...")
-
-                // Surface user flow hint immediately upon scan per CTAP 2.3 §11.5.1.1 before receiving CTAP frames
+            if (!isQrScanMode) {
                 val flowLabel = if (qrData.operationHint == "mc") "MakeCredential (Register)" else "GetAssertion (Sign In)"
-                tv.append("\n➜ Flow Hint: $flowLabel")
-
-                // Warn user if scanned QR timestamp exceeds typical client platform session lifetime
-                qrData.timestampSeconds?.let { qrTimestamp ->
-                    if ((System.currentTimeMillis() / 1000L) - qrTimestamp > 120L) {
+                tv.text = "Parsing...\nParsed successfully. Routing to CTAP Dispatcher...\n➜ Flow Hint: $flowLabel"
+                qrData.timestampSeconds?.let { ts ->
+                    if ((System.currentTimeMillis() / 1000L) - ts > 120L) {
                         tv.append("\n➜ Warning: QR code may be expired.")
                     }
                 }
+            }
 
-                try {
-                    sessionController.onQrCodeScanned(
-                        qrData.publicKey,
-                        qrData.secret,
-                        qrData.tunnelServerId
-                    )
+            try {
+                sessionController.onQrCodeScanned(qrData.publicKey, qrData.secret, qrData.tunnelServerId)
+                if (isQrScanMode) {
+                    updateStatus("BLE Advertising & WebSocket connecting...")
+                } else {
                     tv.append("\n\nSession initiated.\nBLE Advertising & WebSocket connecting...")
-                } catch (e: Exception) {
-                    activeFidoUri = null
-                    Log.e("FidoUriHandler", "Error starting session", e)
-                    tv.append("\n\nError: ${e.message}")
                 }
-            } else {
+            } catch (e: Exception) {
                 activeFidoUri = null
-                tv.append("\n\nInvalid or unsupported FIDO URI.")
+                Log.e("FidoUriHandler", "Error starting session", e)
+                updateStatus("Error: ${e.message}")
             }
         } else if (activeFidoUri == null) {
-            tv.text = "No URI provided. Waiting for FIDO URI intent.\nMake sure you scan a valid FIDO QR code."
+            updateStatus("No URI provided. Waiting for FIDO URI intent.\nMake sure you scan a valid FIDO QR code.", resetTerminal = true)
         }
     }
 
     override fun onDestroy() {
         super.onDestroy()
         activeFidoUri = null
-        // Ensure active BLE advertising and WebSocket connections are terminated when Activity exits
-        if (::sessionController.isInitialized) {
-            sessionController.stopSession()
-        }
+        if (::sessionController.isInitialized) sessionController.stopSession()
     }
 }

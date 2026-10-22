@@ -53,6 +53,10 @@ class TunnelWebsocket(
 
     private var webSocket: WebSocket? = null
 
+    // Track intentional client close so peer TCP resets after receiving the final CTAP response do not trigger false error logs
+    @Volatile
+    private var isClientClosed = false
+
     fun connect() {
         val domain = DomainDerivation.deriveDomainForTunnelId(domainId)
         val tunnelIdHex = ephemeralTunnelId.toHex()
@@ -117,6 +121,11 @@ class TunnelWebsocket(
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                if (isClientClosed) {
+                    Log.d("TunnelWebsocket", "WebSocket closed after client-initiated shutdown.")
+                    onDisconnected?.invoke()
+                    return
+                }
                 // Redact derived hostname from network exception messages (e.g., DNS resolution failures)
                 val sanitizedError = t.message?.replace(domain, "***", ignoreCase = true) ?: "Connection failed"
                 val msg = "WebSocket Error: $sanitizedError"
@@ -133,6 +142,7 @@ class TunnelWebsocket(
     }
 
     fun close() {
+        isClientClosed = true
         webSocket?.close(1000, "Closed by client")
     }
 }

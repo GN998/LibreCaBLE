@@ -45,6 +45,21 @@ class TransportManager(
     // Notify controller when a transaction finishes or the tunnel closes to decouple control flow from log strings
     var onSessionTerminated: (() -> Unit)? = null
 
+    /**
+     * Atomically clear active session references if owned by [sessionWs] so concurrent
+     * callbacks and stopSession() never double-close or leak watchdog jobs.
+     */
+    private fun clearActiveSession(sessionWs: TunnelWebsocket): Boolean = synchronized(this) {
+        if (tunnelWebsocket === sessionWs) {
+            handshakeTimeoutJob?.cancel()
+            handshakeTimeoutJob = null
+            tunnelWebsocket = null
+            true
+        } else {
+            false
+        }
+    }
+
     // Support suspending callback to prevent blocking OkHttp reader thread during UI credential prompts
     fun startSession(
         peerPublicKey: ByteArray,
@@ -103,19 +118,18 @@ class TransportManager(
                     val bleDispatched = bleAdvertiser.startAdvertising(finalEid) { errorCode ->
                         // Handle asynchronous BLE start failures (e.g., ADVERTISE_FAILED_TOO_MANY_ADVERTISERS)
                         // delivered on the main looper so the tunnel does not hang until the 60s watchdog expires.
-                        if (tunnelWebsocket === sessionWs) {
-                            handshakeTimeoutJob?.cancel()
-                            tunnelWebsocket = null
+                        if (clearActiveSession(sessionWs)) {
                             sessionWs.close()
                             onStatusUpdate?.invoke("Error: BLE advertising failed (code $errorCode).")
                             onSessionTerminated?.invoke()
                         }
                     }
                     if (!bleDispatched) {
-                        onStatusUpdate?.invoke("Error: Failed to start BLE advertising.")
-                        sessionWs.close()
-                        tunnelWebsocket = null
-                        onSessionTerminated?.invoke()
+                        if (clearActiveSession(sessionWs)) {
+                            onStatusUpdate?.invoke("Error: Failed to start BLE advertising.")
+                            sessionWs.close()
+                            onSessionTerminated?.invoke()
+                        }
                         return@TunnelWebsocket
                     }
                     onStatusUpdate?.invoke("BLE Advertising Started with 20-byte EID...")
@@ -131,17 +145,20 @@ class TransportManager(
                     // 5. Initialize Noise KNpsk0 state machine with derived noisePsk
                     sessionNoise.initializeHandshake(noisePsk)
 
-                    // Enforce a 60-second handshake deadline to reclaim the WebSocket and URI guard if a scanned QR code is stale
-                    handshakeTimeoutJob?.cancel()
-                    handshakeTimeoutJob = transportScope.launch {
-                        delay(60_000)
-                        if (tunnelWebsocket === sessionWs && !sessionNoise.isHandshakeComplete) {
-                            Log.w("TransportManager", "Handshake timed out waiting for ClientHello; closing session.")
-                            onStatusUpdate?.invoke("Handshake timed out. Please scan the QR code again.")
-                            bleAdvertiser.stopAdvertising()
-                            sessionWs.close()
-                            tunnelWebsocket = null
-                            onSessionTerminated?.invoke()
+                    // Enforce a 60-second handshake deadline under monitor lock so stopSession() cannot race with watchdog creation
+                    synchronized(this@TransportManager) {
+                        if (tunnelWebsocket === sessionWs) {
+                            handshakeTimeoutJob?.cancel()
+                            handshakeTimeoutJob = transportScope.launch {
+                                delay(60_000)
+                                if (!sessionNoise.isHandshakeComplete && clearActiveSession(sessionWs)) {
+                                    Log.w("TransportManager", "Handshake timed out waiting for ClientHello; closing session.")
+                                    onStatusUpdate?.invoke("Handshake timed out. Please scan the QR code again.")
+                                    bleAdvertiser.stopAdvertising()
+                                    sessionWs.close()
+                                    onSessionTerminated?.invoke()
+                                }
+                            }
                         }
                     }
                 },
@@ -151,7 +168,10 @@ class TransportManager(
                         if (!sessionNoise.isHandshakeComplete) {
                             Log.d("TransportManager", "Received ClientHello, processing Noise KNpsk0 handshake...")
                             // Cancel the handshake watchdog and stop BLE proximity advertising once the peer responds
-                            handshakeTimeoutJob?.cancel()
+                            synchronized(this@TransportManager) {
+                                handshakeTimeoutJob?.cancel()
+                                handshakeTimeoutJob = null
+                            }
                             bleAdvertiser.stopAdvertising()
 
                             val serverHello = sessionNoise.processClientHelloAndGenerateServerHello(encryptedFrame)
@@ -197,10 +217,11 @@ class TransportManager(
                                             if (commandByte == 0x01.toByte() || commandByte == 0x02.toByte()) {
                                                 val statusByte = response[0]
                                                 if (statusByte == CtapStatus.SUCCESS) {
-                                                    onStatusUpdate?.invoke("CTAP Transaction Complete.")
-                                                    tunnelWebsocket = null
-                                                    sessionWs.close()
-                                                    onSessionTerminated?.invoke()
+                                                    if (clearActiveSession(sessionWs)) {
+                                                        onStatusUpdate?.invoke("CTAP Transaction Complete.")
+                                                        sessionWs.close()
+                                                        onSessionTerminated?.invoke()
+                                                    }
                                                 } else {
                                                     onStatusUpdate?.invoke("CTAP Rejected (Status: 0x${"%02X".format(statusByte)}).")
                                                 }
@@ -211,10 +232,8 @@ class TransportManager(
                                             Log.e("TransportManager", "Error processing CTAP request", e)
                                             onStatusUpdate?.invoke("CTAP Error: ${e.message}")
                                             // Close the underlying WebSocket on fatal CTAP dispatch errors to prevent orphaned keep-alive pings
+                                            clearActiveSession(sessionWs)
                                             sessionWs.close()
-                                            if (tunnelWebsocket === sessionWs) {
-                                                tunnelWebsocket = null
-                                            }
                                             onSessionTerminated?.invoke()
                                         }
                                     }
@@ -224,10 +243,8 @@ class TransportManager(
                                     Log.d("TransportManager", "Received Shutdown message (0x00), closing tunnel.")
                                     onStatusUpdate?.invoke("Peer closed connection. Session complete.")
                                     bleAdvertiser.stopAdvertising()
+                                    clearActiveSession(sessionWs)
                                     sessionWs.close()
-                                    if (tunnelWebsocket === sessionWs) {
-                                        tunnelWebsocket = null
-                                    }
                                     onSessionTerminated?.invoke()
                                 }
                                 else -> Log.d("TransportManager", "Received Unknown Frame Type: 0x${frameType.toString(16)}")
@@ -236,13 +253,10 @@ class TransportManager(
                     } catch (e: Exception) {
                         val msg = "Frame Error: ${e.message}"
                         Log.e("TransportManager", msg, e)
-                        handshakeTimeoutJob?.cancel()
                         bleAdvertiser.stopAdvertising()
                         // Close the WebSocket when handshake or frame decryption fails so the tunnel does not remain open indefinitely
+                        clearActiveSession(sessionWs)
                         sessionWs.close()
-                        if (tunnelWebsocket === sessionWs) {
-                            tunnelWebsocket = null
-                        }
                         onStatusUpdate?.invoke(msg)
                         onSessionTerminated?.invoke()
                     }
@@ -254,10 +268,8 @@ class TransportManager(
                 },
                 onDisconnected = {
                     // Stop BLE advertising and reset session guard via explicit disconnect callback instead of log string matching
-                    if (tunnelWebsocket === sessionWs) {
-                        handshakeTimeoutJob?.cancel()
+                    if (clearActiveSession(sessionWs)) {
                         bleAdvertiser.stopAdvertising()
-                        tunnelWebsocket = null
                         onSessionTerminated?.invoke()
                     }
                 }
