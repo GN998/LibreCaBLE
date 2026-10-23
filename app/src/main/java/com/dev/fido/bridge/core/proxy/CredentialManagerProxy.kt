@@ -18,7 +18,6 @@ import com.dev.fido.bridge.core.ctap.mapper.CtapMapper
 import com.dev.fido.bridge.core.ctap.model.Ctap2Request
 import com.dev.fido.bridge.core.ctap.model.Ctap2Response
 import com.dev.fido.bridge.core.ctap.model.CtapStatus
-import com.dev.fido.bridge.core.security.toHex
 import kotlinx.coroutines.CancellationException
 
 class CredentialManagerProxy(private val context: Context) {
@@ -42,10 +41,10 @@ class CredentialManagerProxy(private val context: Context) {
 
         val jsonRequest = CtapMapper.toWebAuthnGetCredentialJson(req)
         val trustedOrigin = "https://${req.rpId}"
-        val clientDataHashHex = req.clientDataHash.toHex(uppercase = true)
 
-        Log.d("CredentialManagerProxy", "GetAssertion Request JSON: $jsonRequest")
-        Log.d("CredentialManagerProxy", "GetAssertion PC clientDataHash: $clientDataHashHex, origin: $trustedOrigin")
+        // Strip sensitive WebAuthn request/response payloads from release logs via R8 assumenosideeffects
+        // and avoid eager ByteArray.toHex() string allocations on the main thread before UI dispatch.
+        Log.d("CredentialManagerProxy", "Dispatching GetAssertion for origin: $trustedOrigin")
 
         // Enforce strict privileged request with both setOrigin and PC's raw clientDataHash.
         // Never fall back to an unprivileged request without setOrigin, as doing so causes
