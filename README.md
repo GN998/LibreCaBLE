@@ -24,3 +24,4 @@ Licensed under the [GNU General Public License v3.0 (GPLv3)](LICENSE).
 * **[FIDO Alliance](https://fidoalliance.org/)**: CTAP 2.3 and WebAuthn specifications.
 * **[Bitwarden](https://github.com/bitwarden/android)**: Open-source Android `CredentialManager` and local trust integration.
 * **[Cloudflare](https://www.cloudflare.com/)**: WebSocket tunnel relay infrastructure.
+* **[linux.do](https://linux.do/)**
