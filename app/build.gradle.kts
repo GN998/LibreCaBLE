@@ -50,7 +50,7 @@ android {
         minSdk = 34
         targetSdk = 35
         versionCode = 4
-        versionName = "1.2.0"
+        versionName = "1.2.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("int", "TUNNEL_ID", "$tunnelId")
