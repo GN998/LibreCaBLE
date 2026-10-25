@@ -24,7 +24,9 @@ data class PreparedClientCeremony(
     val ctapRequest: Ctap2Request,
     val clientDataJsonBytes: ByteArray,
     val operationHint: String,
-    val attestationPreference: String = "none"
+    val attestationPreference: String = "none",
+    // Track whether the Relying Party requested the WebAuthn §10.1.3 credProps extension during registration
+    val credPropsRequested: Boolean = false
 )
 
 object ClientWebAuthnAssembler {
@@ -111,6 +113,9 @@ object ClientWebAuthnAssembler {
         val rk = requireRk || residentKeyStr == "required" || residentKeyStr == "preferred"
         val uvStr = authSel?.optString("userVerification", "preferred") ?: "preferred"
 
+        // Extract WebAuthn §10.1.3 credProps extension input if requested by the Relying Party
+        val credPropsRequested = json.optJSONObject("extensions")?.optBoolean("credProps", false) == true
+
         val options = buildMap<String, Boolean> {
             if (rk) put("rk", true)
             if (uvStr == "required" || uvStr == "preferred") put("uv", true)
@@ -140,7 +145,8 @@ object ClientWebAuthnAssembler {
             ctapRequest = ctapReq,
             clientDataJsonBytes = clientDataBytes,
             operationHint = "mc",
-            attestationPreference = attestationPref
+            attestationPreference = attestationPref,
+            credPropsRequested = credPropsRequested
         )
     }
 
@@ -177,12 +183,14 @@ object ClientWebAuthnAssembler {
     /**
      * Assemble WebAuthn RegistrationResponseJSON string from a CTAP2 MakeCredentialResponse per WebAuthn §5.1.
      * Strip attestation statement while retaining the 16-byte AAGUID when [attestationPreference] is "none" per WebAuthn Level 3 §5.1.3,
-     * and populate authenticatorData, publicKeyAlgorithm, and SPKI publicKey required by Chromium's MojoClassFromJSON parser.
+     * and populate authenticatorData, publicKeyAlgorithm, SPKI publicKey, and optional credProps clientExtensionResults.
      */
     fun buildMakeCredentialResponseJson(
         response: Ctap2Response.MakeCredentialResponse,
         clientDataJsonBytes: ByteArray,
-        attestationPreference: String = "none"
+        attestationPreference: String = "none",
+        credPropsRequested: Boolean = false,
+        isDiscoverableKey: Boolean = false
     ): String {
         val stripAttestation = attestationPreference == "none"
         // Retain the 16-byte AAGUID in authData when attestation conveyance is "none" per WebAuthn Level 3 §5.1.3.
@@ -197,6 +205,13 @@ object ClientWebAuthnAssembler {
             "attStmt" to if (stripAttestation) emptyMap<Any, Any>() else response.attStmt
         )
         val attestationObjectBytes = CtapCodec.SimpleCbor.write(attestationObjectMap)
+
+        val clientExtensionResults = JSONObject().apply {
+            // Populate WebAuthn §10.1.3 CredentialPropertiesOutput ("rk" boolean) when requested by the Relying Party
+            if (credPropsRequested) {
+                put("credProps", JSONObject().put("rk", isDiscoverableKey))
+            }
+        }
 
         return JSONObject().apply {
             put("id", credIdB64)
@@ -213,7 +228,7 @@ object ClientWebAuthnAssembler {
                     put("publicKey", CryptoUtils.encodeBase64UrlNoPadding(spki))
                 }
             })
-            put("clientExtensionResults", JSONObject())
+            put("clientExtensionResults", clientExtensionResults)
         }.toString()
     }
 
