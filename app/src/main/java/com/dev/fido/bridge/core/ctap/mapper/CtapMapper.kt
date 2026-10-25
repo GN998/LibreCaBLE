@@ -56,6 +56,10 @@ object CtapMapper {
                 put("requireResidentKey", rkRequired)
                 put("userVerification", uvRequired.toWebAuthnUv())
             })
+            // Request direct attestation from the underlying credential provider so hardware or vendor
+            // attestation statements (fmt, attStmt) and AAGUID are preserved over CTAP2; the client
+            // platform remains responsible for applying the RP's attestation conveyance preference.
+            put("attestation", "direct")
         }.toString()
     }
 
