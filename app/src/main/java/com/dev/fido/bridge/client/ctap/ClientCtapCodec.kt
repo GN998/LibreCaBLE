@@ -43,6 +43,7 @@ object ClientCtapCodec {
     ): ByteArray {
         return when (request) {
             is Ctap2Request.GetInfo -> byteArrayOf(0x04)
+            is Ctap2Request.Selection -> byteArrayOf(0x0B)
             is Ctap2Request.MakeCredential -> {
                 val filteredOptions = request.options?.filterKeys { key ->
                     key != "uv" || authenticatorSupportsBuiltInUv
@@ -99,7 +100,7 @@ object ClientCtapCodec {
 
     /**
      * Decode a raw CTAP2 response payload (1-byte status code followed by optional CBOR map)
-     * given the originating [commandByte] (0x01 MakeCredential or 0x02 GetAssertion).
+     * given the originating [commandByte] (0x01 MakeCredential, 0x02 GetAssertion, or 0x0B Selection).
      */
     fun decodeResponse(commandByte: Byte, rawResponse: ByteArray): Ctap2Response {
         if (rawResponse.isEmpty()) {
@@ -108,6 +109,12 @@ object ClientCtapCodec {
         val status = rawResponse[0]
         if (status != CtapStatus.SUCCESS) {
             return Ctap2Response.ErrorResponse(status)
+        }
+        if (commandByte == 0x0B.toByte()) {
+            if (rawResponse.size != 1) {
+                throw CtapCodecException(CtapStatus.ERR_INVALID_CBOR, "Selection response must not contain CBOR payload")
+            }
+            return Ctap2Response.SelectionResponse
         }
 
         val cborBytes = if (rawResponse.size > 1) rawResponse.copyOfRange(1, rawResponse.size) else ByteArray(0)
@@ -130,11 +137,13 @@ object ClientCtapCodec {
                 val signature = map.requireField<ByteArray>(3L, "GetAssertion.signature")
                 val userMap = map[4L] as? Map<*, *>
                 val userHandle = userMap?.get("id") as? ByteArray
+                val userSelected = map[6L] == true
                 Ctap2Response.GetAssertionResponse(
                     credentialId = credentialId,
                     authenticatorData = authData,
                     signature = signature,
-                    userHandle = userHandle
+                    userHandle = userHandle,
+                    userSelected = userSelected
                 )
             }
             else -> throw CtapCodecException(CtapStatus.ERR_INVALID_COMMAND, "Unsupported response command context: $commandByte")

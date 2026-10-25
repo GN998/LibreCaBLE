@@ -1,8 +1,9 @@
 package com.dev.fido.bridge.core.ctap.model
 
 sealed class Ctap2Request {
-    // Use singleton data object to avoid allocating dummy fields for stateless GetInfo requests
+    // Use singleton data objects to avoid allocating dummy fields for stateless GetInfo and Selection requests
     data object GetInfo : Ctap2Request()
+    data object Selection : Ctap2Request()
 
     data class GetAssertion(
         val rpId: String,
@@ -40,14 +41,19 @@ sealed class Ctap2Response {
         val aaguid: ByteArray,
         val options: Map<String, Boolean>,
         val maxMsgSize: Int,
-        val pinUvAuthProtocols: List<Int>
+        val pinUvAuthProtocols: List<Int>,
+        val algorithms: List<Map<String, Any>> = emptyList()
     ) : Ctap2Response()
+
+    data object SelectionResponse : Ctap2Response()
 
     data class GetAssertionResponse(
         val credentialId: ByteArray,
         val authenticatorData: ByteArray,
         val signature: ByteArray,
-        val userHandle: ByteArray? = null
+        val userHandle: ByteArray? = null,
+        // Indicate whether a credential was explicitly selected via the authenticator UI per CTAP 2.3 §6.2.2
+        val userSelected: Boolean = false
     ) : Ctap2Response()
 
     data class MakeCredentialResponse(

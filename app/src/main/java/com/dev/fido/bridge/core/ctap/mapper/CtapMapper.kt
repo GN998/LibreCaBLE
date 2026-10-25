@@ -100,7 +100,9 @@ object CtapMapper {
             credentialId = credentialId,
             authenticatorData = CryptoUtils.decodeBase64Url(responseObj.getString("authenticatorData")),
             signature = CryptoUtils.decodeBase64Url(responseObj.getString("signature")),
-            userHandle = userHandle
+            userHandle = userHandle,
+            // Set userSelected to true when the user selected a discoverable credential on the authenticator UI per CTAP 2.3 §6.2.2
+            userSelected = allowList.isNullOrEmpty()
         )
     }
 

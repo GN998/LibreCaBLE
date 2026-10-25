@@ -21,15 +21,15 @@ class CtapCodecException(
 
 /**
  * Map CTAP2 boolean "uv" option flag to WebAuthn userVerification requirement string.
- * Since AuthenticatorInfo advertises options["uv"] = true, CTAP 2.3 §6.1.1 & §6.2.1 platforms
- * send "uv" = true for both "required" and "preferred", and omit "uv" (null) only when "discouraged".
+ * Since AuthenticatorInfo advertises options["alwaysUv"] = true and options["uv"] = true,
+ * CTAP 2.3 §6.1.2 Step 6.3 and §6.2.2 Step 5.4 mandate treating "uv" as true even when omitted or false.
  */
-fun Boolean?.toWebAuthnUv(): String = if (this == true) "required" else "discouraged"
+fun Boolean?.toWebAuthnUv(): String = "required"
 
 object CtapCodec {
 
     // Include standard and post-quantum COSE algorithms across CTAP 2.0-2.3 so modern credential providers can negotiate newer key types while still rejecting bogus conformance probes pre-UI
-    private val SUPPORTED_COSE_ALGORITHMS = setOf(
+    internal val SUPPORTED_COSE_ALGORITHMS = setOf(
         -7L, -8L, -9L, -35L, -36L, -37L, -38L, -39L, -47L,
         -48L, -49L, -50L, -257L, -258L, -259L, -65535L
     )
@@ -49,6 +49,12 @@ object CtapCodec {
                         throw CtapCodecException(CtapStatus.ERR_INVALID_CBOR, "GetInfo command must not contain parameters")
                     }
                     Ctap2Request.GetInfo
+                }
+                0x0B.toByte() -> {
+                    if (cborBytes.isNotEmpty()) {
+                        throw CtapCodecException(CtapStatus.ERR_INVALID_CBOR, "Selection command must not contain parameters")
+                    }
+                    Ctap2Request.Selection
                 }
                 0x01.toByte() -> decodeMakeCredential(cborBytes)
                 0x02.toByte() -> decodeGetAssertion(cborBytes)
@@ -130,6 +136,19 @@ object CtapCodec {
             throw CtapCodecException(CtapStatus.ERR_INVALID_OPTION, "Option 'up'=false is not valid in MakeCredential")
         }
 
+        // Reject unsupported pinUvAuthParam (key 8) / pinUvAuthProtocol (key 9) per CTAP 2.3 §6.1.2 Step 4
+        validatePinUvAuthFields(map, paramKey = 8L, protocolKey = 9L)
+
+        // Reject enterpriseAttestation (key 10) since "ep" option is not advertised per CTAP 2.3 §6.1.2 Step 9.1
+        map[10L]?.let { rawEp ->
+            val ep = rawEp as? Long
+                ?: throw CtapCodecException(CtapStatus.ERR_CBOR_UNEXPECTED_TYPE, "enterpriseAttestation must be a CBOR unsigned integer")
+            if (ep < 0L) {
+                throw CtapCodecException(CtapStatus.ERR_CBOR_UNEXPECTED_TYPE, "enterpriseAttestation must be non-negative")
+            }
+            throw CtapCodecException(CtapStatus.ERR_INVALID_PARAMETER, "Enterprise attestation is not supported")
+        }
+
         return Ctap2Request.MakeCredential(
             clientDataHash = clientDataHash,
             rpId = rpId,
@@ -162,6 +181,9 @@ object CtapCodec {
         // Default "up" to true when absent per CTAP 2.3 §6.2.2 Step 4.5
         val upFlag = options?.get("up") ?: true
 
+        // Reject unsupported pinUvAuthParam (key 6) / pinUvAuthProtocol (key 7) per CTAP 2.3 §6.2.2 Step 2
+        validatePinUvAuthFields(map, paramKey = 6L, protocolKey = 7L)
+
         return Ctap2Request.GetAssertion(
             rpId = rpId,
             clientDataHash = clientDataHash,
@@ -184,6 +206,27 @@ object CtapCodec {
             val valBool = v as? Boolean
                 ?: throw CtapCodecException(CtapStatus.ERR_CBOR_UNEXPECTED_TYPE, "$fieldName['$keyStr'] value must be a boolean")
             keyStr to valBool
+        }
+    }
+
+    /**
+     * Type-check and reject pinUvAuthParam / pinUvAuthProtocol fields when pinUvAuthProtocols is not supported
+     * per CTAP 2.3 §6.1.2 Step 4 and §6.2.2 Step 2.
+     */
+    private fun validatePinUvAuthFields(map: Map<*, *>, paramKey: Long, protocolKey: Long) {
+        val rawParam = map[paramKey]
+        val rawProtocol = map[protocolKey]
+        if (rawParam != null && rawParam !is ByteArray) {
+            throw CtapCodecException(CtapStatus.ERR_CBOR_UNEXPECTED_TYPE, "pinUvAuthParam must be a CBOR byte string")
+        }
+        if (rawProtocol != null && (rawProtocol !is Long || rawProtocol < 0L)) {
+            throw CtapCodecException(CtapStatus.ERR_CBOR_UNEXPECTED_TYPE, "pinUvAuthProtocol must be a CBOR unsigned integer")
+        }
+        if (rawParam != null) {
+            if (rawProtocol == null) {
+                throw CtapCodecException(CtapStatus.ERR_MISSING_PARAMETER, "Missing pinUvAuthProtocol for pinUvAuthParam")
+            }
+            throw CtapCodecException(CtapStatus.ERR_INVALID_PARAMETER, "Unsupported pinUvAuthProtocol: $rawProtocol")
         }
     }
 
@@ -215,6 +258,7 @@ object CtapCodec {
     fun encodeResponse(response: Ctap2Response): ByteArray {
         return when (response) {
             is Ctap2Response.ErrorResponse -> byteArrayOf(response.errorCode)
+            is Ctap2Response.SelectionResponse -> byteArrayOf(CtapStatus.SUCCESS)
             is Ctap2Response.GetInfoResponse -> {
                 byteArrayOf(CtapStatus.SUCCESS) + SimpleCbor.write(AuthenticatorInfo.toCborMap(response))
             }
@@ -235,6 +279,9 @@ object CtapCodec {
                     map[1L] = mapOf("id" to response.credentialId, "type" to "public-key")
                 }
                 response.userHandle?.let { map[4L] = mapOf("id" to it) }
+                if (response.userSelected) {
+                    map[6L] = true
+                }
                 byteArrayOf(CtapStatus.SUCCESS) + SimpleCbor.write(map)
             }
         }
