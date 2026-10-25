@@ -358,8 +358,8 @@ object CtapCodec {
                             20 -> false
                             21 -> true
                             22 -> null
-                            // Decode IEEE 754 half, single, and double precision floats so unknown extension or GREASE map entries containing floats can be safely ignored per CTAP 2.3 §8
-                            25 -> Half.toFloat(value.toShort())
+                            // Preserve exact 16-, 32-, and 64-bit IEEE 754 float widths per CTAP 2.3 §8
+                            25 -> Half.valueOf(value.toShort())
                             26 -> Float.fromBits(value.toInt())
                             27 -> Double.fromBits(value)
                             else -> throw CtapCodecException(CtapStatus.ERR_INVALID_CBOR, "Unsupported CBOR simple value or float: $info")
@@ -415,24 +415,47 @@ object CtapCodec {
             fun writeItem(v: Any?) {
                 when (v) {
                     null -> out.write(0xF6)
-                    is Int -> if (v >= 0) writeMajor(0, v.toLong()) else writeMajor(1, -1L - v.toLong())
-                    is Long -> if (v >= 0) writeMajor(0, v) else writeMajor(1, -1L - v)
+                    is Byte, is Short, is Int, is Long -> {
+                        val l = (v as Number).toLong()
+                        if (l >= 0L) writeMajor(0, l) else writeMajor(1, -1L - l)
+                    }
+                    // Preserve exact 16-, 32-, and 64-bit IEEE 754 float widths per CTAP 2.3 §8
+                    is Half -> {
+                        val bits = v.halfValue().toInt() and 0xFFFF
+                        out.write(0xF9)
+                        out.write(bits ushr 8)
+                        out.write(bits)
+                    }
+                    is Float -> {
+                        val bits = v.toRawBits()
+                        out.write(0xFA)
+                        out.write(bits ushr 24)
+                        out.write(bits ushr 16)
+                        out.write(bits ushr 8)
+                        out.write(bits)
+                    }
+                    is Double -> {
+                        val bits = v.toRawBits()
+                        out.write(0xFB)
+                        out.write((bits ushr 56).toInt())
+                        out.write((bits ushr 48).toInt())
+                        out.write((bits ushr 40).toInt())
+                        out.write((bits ushr 32).toInt())
+                        out.write((bits ushr 24).toInt())
+                        out.write((bits ushr 16).toInt())
+                        out.write((bits ushr 8).toInt())
+                        out.write(bits.toInt())
+                    }
                     is ByteArray -> { writeMajor(2, v.size.toLong()); out.write(v) }
                     is String -> { val b = v.toByteArray(Charsets.UTF_8); writeMajor(3, b.size.toLong()); out.write(b) }
                     is List<*> -> { writeMajor(4, v.size.toLong()); v.forEach { writeItem(it) } }
                     is Map<*, *> -> {
                         writeMajor(5, v.size.toLong())
-                        // Sort map keys canonically per CTAP2 specification (length first, then lexicographical byte order)
+                        // Sort encoded map keys in bytewise lexicographic order per CTAP 2.3 §8 (major type, then length, then value)
                         val sortedEntries = v.entries.map { (k, vl) ->
                             write(k) to vl
                         }.sortedWith { a, b ->
-                            val k1Bytes = a.first
-                            val k2Bytes = b.first
-                            if (k1Bytes.size != k2Bytes.size) {
-                                k1Bytes.size.compareTo(k2Bytes.size)
-                            } else {
-                                Arrays.compareUnsigned(k1Bytes, k2Bytes)
-                            }
+                            Arrays.compareUnsigned(a.first, b.first)
                         }
                         sortedEntries.forEach { (kBytes, vl) ->
                             out.write(kBytes)
@@ -440,6 +463,10 @@ object CtapCodec {
                         }
                     }
                     is Boolean -> out.write(if (v) 0xF5 else 0xF4)
+                    else -> throw CtapCodecException(
+                        CtapStatus.ERR_INVALID_CBOR,
+                        "Unsupported CBOR value type: ${v.javaClass.simpleName}"
+                    )
                 }
             }
             writeItem(value)

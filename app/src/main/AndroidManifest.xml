@@ -16,7 +16,7 @@
 
     <application
         android:name=".BridgeApplication"
-        android:allowBackup="false"
+        android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
         android:label="Passkey Bridge"
         android:roundIcon="@mipmap/ic_launcher_round"
@@ -44,12 +44,11 @@
             </intent-filter>
         </activity>
 
-        <!-- Client mode QR prompt activity invoked via PendingIntent from BridgeCredentialProviderService -->
+        <!-- Restrict ClientQrPromptActivity to internal PendingIntent launches from BridgeCredentialProviderService to prevent external spoofing and ensure each ceremony runs in a fresh standard instance -->
         <activity
             android:name=".client.ui.ClientQrPromptActivity"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|uiMode|keyboard|keyboardHidden"
-            android:exported="true"
-            android:launchMode="singleTop"
+            android:exported="false"
             android:theme="@style/Theme.PasskeyBridge" />
 
         <!-- Android 14+ Credential Provider service for client-mode hybrid QR presentation -->
