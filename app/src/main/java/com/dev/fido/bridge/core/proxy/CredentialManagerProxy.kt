@@ -26,6 +26,8 @@ class CredentialManagerProxy(private val context: Context) {
     suspend fun handleCtapRequest(request: Ctap2Request): Ctap2Response {
         return when (request) {
             is Ctap2Request.GetInfo -> AuthenticatorInfo.getInfo()
+            // Scanning the QR code on the phone inherently confirms user selection of this authenticator per CTAP 2.3 §6.9
+            is Ctap2Request.Selection -> Ctap2Response.SelectionResponse
             is Ctap2Request.GetAssertion -> handleGetAssertion(request)
             is Ctap2Request.MakeCredential -> handleMakeCredential(request)
         }

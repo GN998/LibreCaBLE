@@ -156,6 +156,7 @@ class ClientTransportManager(
             is Ctap2Request.MakeCredential -> 0x01
             is Ctap2Request.GetAssertion -> 0x02
             is Ctap2Request.GetInfo -> 0x04
+            is Ctap2Request.Selection -> 0x0B
         }
 
         lateinit var ws: ClientTunnelWebsocket

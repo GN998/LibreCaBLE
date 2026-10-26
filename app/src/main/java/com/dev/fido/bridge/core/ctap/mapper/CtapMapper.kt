@@ -56,6 +56,10 @@ object CtapMapper {
                 put("requireResidentKey", rkRequired)
                 put("userVerification", uvRequired.toWebAuthnUv())
             })
+            // Request direct attestation from the underlying credential provider so hardware or vendor
+            // attestation statements (fmt, attStmt) and AAGUID are preserved over CTAP2; the client
+            // platform remains responsible for applying the RP's attestation conveyance preference.
+            put("attestation", "direct")
         }.toString()
     }
 
@@ -100,7 +104,9 @@ object CtapMapper {
             credentialId = credentialId,
             authenticatorData = CryptoUtils.decodeBase64Url(responseObj.getString("authenticatorData")),
             signature = CryptoUtils.decodeBase64Url(responseObj.getString("signature")),
-            userHandle = userHandle
+            userHandle = userHandle,
+            // Set userSelected to true when the user selected a discoverable credential on the authenticator UI per CTAP 2.3 §6.2.2
+            userSelected = allowList.isNullOrEmpty()
         )
     }
 
