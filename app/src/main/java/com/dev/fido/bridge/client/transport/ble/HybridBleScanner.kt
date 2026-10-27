@@ -39,9 +39,12 @@ class HybridBleScanner(private val scannerProvider: () -> BluetoothLeScanner?) {
             .setServiceUuid(fidoServiceUuid)
             .build()
 
-        // Use SCAN_MODE_LOW_LATENCY so the client detects the authenticator's proximity burst immediately
+        // Enable extended advertising reception (legacy = false) and all supported PHYs so BLE 5.0
+        // advertisement suffixes containing the L2CAP server PSM (>20 bytes) are not truncated by the controller.
         val settings = ScanSettings.Builder()
             .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
+            .setLegacy(false)
+            .setPhy(ScanSettings.PHY_LE_ALL_SUPPORTED)
             .build()
 
         val callback = object : ScanCallback() {
@@ -49,7 +52,7 @@ class HybridBleScanner(private val scannerProvider: () -> BluetoothLeScanner?) {
                 val scanRecord = result?.scanRecord ?: return
                 val serviceData = scanRecord.getServiceData(fidoServiceUuid) ?: return
 
-                val decrypted = CryptoHelper.trialDecryptEid(eidKey, serviceData) ?: return
+                val decrypted = CryptoHelper.trialDecryptEid(eidKey, serviceData, result.device) ?: return
 
                 // Stop BLE radio scanning under lock before invoking network connection on the critical path
                 val wonRace = synchronized(this@HybridBleScanner) {

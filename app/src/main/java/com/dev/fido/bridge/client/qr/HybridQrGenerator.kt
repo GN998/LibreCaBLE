@@ -41,14 +41,16 @@ object HybridQrGenerator {
         val epochSeconds = System.currentTimeMillis() / 1000L
         val normalizedHint = if (operationHint == "mc") "mc" else "ga"
 
-        // Construct canonical CBOR map for QR code payload per CTAP 2.3 §11.5.1.1
+        // Construct canonical CBOR map for QR code payload per CTAP 2.3 §11.5.1.1 and PXP §5.3.1
         val qrCborMap = mapOf<Long, Any>(
             0L to compressedPubKey,
             1L to qrSecret,
             2L to DomainDerivation.NUM_ASSIGNED_DOMAINS,
             3L to epochSeconds,
             4L to false, // State-assisted linking disabled; enforce stateless QR flow
-            5L to normalizedHint
+            5L to normalizedHint,
+            // Advertise support for both WebSockets (0) and BLE L2CAP (1) data transfer channels per PXP §5.3.1 Key 6
+            6L to listOf(0L, 1L)
         )
 
         val cborBytes = CtapCodec.SimpleCbor.write(qrCborMap)

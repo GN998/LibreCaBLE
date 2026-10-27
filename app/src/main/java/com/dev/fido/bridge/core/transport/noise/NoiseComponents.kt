@@ -1,5 +1,7 @@
 package com.dev.fido.bridge.core.transport.noise
 
+import android.bluetooth.BluetoothDevice
+import com.dev.fido.bridge.core.ctap.codec.CtapCodec
 import com.dev.fido.bridge.core.security.toFixedLengthBytes
 import java.math.BigInteger
 import java.security.AlgorithmParameters
@@ -27,13 +29,16 @@ const val AEMK_ALGORITHM = "AES"
 const val EC_ALGORITHM = "EC"
 
 /**
- * Unpacked fields from a verified 16-byte caBLE v2 BLE proximity advertisement plaintext per CTAP 2.3 §11.5.1.1.
+ * Unpacked fields from a verified 16-byte caBLE v2 BLE proximity advertisement plaintext
+ * and optional extended advertising suffix per PXP §5.4.1 & §6.1.2.
  */
 data class DecryptedBleAdvert(
     val plaintext: ByteArray,
     val nonce: ByteArray,
     val routingId: ByteArray,
-    val encodedTunnelServerDomain: Int
+    val encodedTunnelServerDomain: Int,
+    val serverPsm: Int? = null,
+    val bluetoothDevice: BluetoothDevice? = null
 )
 
 object CryptoHelper {
@@ -155,9 +160,13 @@ object CryptoHelper {
 
     /**
      * Trial-decrypt a candidate BLE service data payload (at least 20 bytes) using the 64-byte derived EID key
-     * per CTAP 2.3 §11.5.1.1. Ignore trailing extended advertising suffix bytes if present.
+     * per PXP §5.4.1, and extract the optional L2CAP server PSM from the trailing CBOR advertisement suffix.
      */
-    fun trialDecryptEid(eidKey: ByteArray, candidateServiceData: ByteArray): DecryptedBleAdvert? {
+    fun trialDecryptEid(
+        eidKey: ByteArray,
+        candidateServiceData: ByteArray,
+        device: BluetoothDevice? = null
+    ): DecryptedBleAdvert? {
         if (eidKey.size != 64 || candidateServiceData.size < 20) return null
 
         val hmacKey = eidKey.copyOfRange(32, 64)
@@ -185,11 +194,24 @@ object CryptoHelper {
         val routingId = plaintext.copyOfRange(11, 14)
         val encodedDomain = (plaintext[14].toInt() and 0xFF) or ((plaintext[15].toInt() and 0xFF) shl 8)
 
+        // Parse optional CBOR advertisement suffix {1: server_psm} if extended advertising bytes are present per PXP §5.4.1 & §6.1.2
+        val serverPsm = if (candidateServiceData.size > 20) {
+            runCatching {
+                val suffixBytes = candidateServiceData.copyOfRange(20, candidateServiceData.size)
+                val suffixMap = CtapCodec.SimpleCbor.read(suffixBytes, strict = false) as? Map<*, *>
+                (suffixMap?.get(1L) as? Number)?.toInt()?.takeIf { it in 1..65535 }
+            }.getOrNull()
+        } else {
+            null
+        }
+
         return DecryptedBleAdvert(
             plaintext = plaintext,
             nonce = nonce,
             routingId = routingId,
-            encodedTunnelServerDomain = encodedDomain
+            encodedTunnelServerDomain = encodedDomain,
+            serverPsm = serverPsm,
+            bluetoothDevice = device
         )
     }
 
