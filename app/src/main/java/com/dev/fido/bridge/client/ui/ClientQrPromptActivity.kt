@@ -13,6 +13,7 @@ import android.os.Bundle
 import android.util.Log
 import android.view.Gravity
 import android.view.View
+import android.view.WindowManager
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
@@ -73,6 +74,8 @@ class ClientQrPromptActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Block screenshots, screen recording, and non-secure display capture to protect the ephemeral FIDO:/ QR secret
+        window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         setTranslucent(true)
         supportActionBar?.hide()
 
