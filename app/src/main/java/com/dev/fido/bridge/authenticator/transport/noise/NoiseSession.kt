@@ -1,6 +1,9 @@
-package com.dev.fido.bridge.core.transport.noise
+package com.dev.fido.bridge.authenticator.transport.noise
 
 import android.util.Log
+import com.dev.fido.bridge.core.transport.noise.CryptoHelper
+import com.dev.fido.bridge.core.transport.noise.NoiseCrypter
+import com.dev.fido.bridge.core.transport.noise.NoiseHandshakeState
 import java.security.interfaces.ECPrivateKey
 
 class NoiseSession {

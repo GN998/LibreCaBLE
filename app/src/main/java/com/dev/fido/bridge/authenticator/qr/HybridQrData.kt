@@ -1,4 +1,4 @@
-package com.dev.fido.bridge.core.hybrid
+package com.dev.fido.bridge.authenticator.qr
 
 // Data class representing extracted FIDO URI parameters
 data class HybridQrData(

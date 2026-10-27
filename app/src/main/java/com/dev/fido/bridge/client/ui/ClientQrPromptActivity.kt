@@ -46,7 +46,7 @@ import com.dev.fido.bridge.client.transport.ble.HybridBleScanner
 import com.dev.fido.bridge.core.ctap.model.Ctap2Request
 import com.dev.fido.bridge.core.ctap.model.Ctap2Response
 import com.dev.fido.bridge.core.ctap.model.CtapStatus
-import com.dev.fido.bridge.feature.session.BridgeForegroundService
+import com.dev.fido.bridge.core.session.BridgeForegroundService
 
 /**
  * Translucent bottom-sheet Activity invoked by Android CredentialManager when the user selects

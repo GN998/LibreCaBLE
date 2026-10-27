@@ -1,4 +1,4 @@
-package com.dev.fido.bridge.feature.session
+package com.dev.fido.bridge.core.session
 
 import android.app.Notification
 import android.app.NotificationChannel

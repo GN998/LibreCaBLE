@@ -1,13 +1,14 @@
-package com.dev.fido.bridge.feature.session
+package com.dev.fido.bridge.authenticator.session
 
 import android.content.Context
 import android.content.Intent
 import android.util.Log
+import com.dev.fido.bridge.authenticator.proxy.CredentialManagerProxy
+import com.dev.fido.bridge.authenticator.transport.TransportManager
 import com.dev.fido.bridge.core.ctap.codec.CtapCodec
 import com.dev.fido.bridge.core.ctap.codec.CtapCodecException
 import com.dev.fido.bridge.core.ctap.model.CtapStatus
-import com.dev.fido.bridge.core.proxy.CredentialManagerProxy
-import com.dev.fido.bridge.core.transport.TransportManager
+import com.dev.fido.bridge.core.session.BridgeForegroundService
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers

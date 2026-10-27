@@ -10,6 +10,7 @@ import com.dev.fido.bridge.core.ctap.codec.CtapCodec
 import com.dev.fido.bridge.core.ctap.model.Ctap2Request
 import com.dev.fido.bridge.core.ctap.model.Ctap2Response
 import com.dev.fido.bridge.core.security.DomainDerivation
+import com.dev.fido.bridge.core.transport.PxpDataChannel
 import com.dev.fido.bridge.core.transport.noise.CryptoHelper
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -27,7 +28,7 @@ class ClientTransportManager(
     private val transportScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     @Volatile
-    private var activeWebsocket: ClientTunnelWebsocket? = null
+    private var activeChannel: PxpDataChannel? = null
 
     @Volatile
     private var sessionTimeoutJob: Job? = null
@@ -38,11 +39,11 @@ class ClientTransportManager(
     @Volatile
     var onPeerConnected: (() -> Unit)? = null
 
-    private fun clearActiveSession(ws: ClientTunnelWebsocket?): Boolean = synchronized(this) {
-        if (ws == null || activeWebsocket === ws) {
+    private fun clearActiveSession(channel: PxpDataChannel?): Boolean = synchronized(this) {
+        if (channel == null || activeChannel === channel) {
             sessionTimeoutJob?.cancel()
             sessionTimeoutJob = null
-            activeWebsocket = null
+            activeChannel = null
             true
         } else {
             false
@@ -159,25 +160,25 @@ class ClientTransportManager(
             is Ctap2Request.Selection -> 0x0B
         }
 
-        lateinit var ws: ClientTunnelWebsocket
+        lateinit var channel: PxpDataChannel
 
         fun sendEncryptedFrame(plaintext: ByteArray) {
             synchronized(noiseSession) {
-                ws.sendFrame(noiseSession.encrypt(plaintext))
+                channel.sendFrame(noiseSession.encrypt(plaintext))
             }
         }
 
-        ws = ClientTunnelWebsocket(
+        val ws = ClientTunnelWebsocket(
             domain = domain,
             routingId = advert.routingId,
             tunnelId = tunnelId,
             onConnected = {
-                if (activeWebsocket !== ws) return@ClientTunnelWebsocket
+                if (activeChannel !== channel) return@ClientTunnelWebsocket
                 // Initiator speaks first in KNpsk0 to prove possession of the decrypted BLE advert
-                ws.sendFrame(clientHello)
+                channel.sendFrame(clientHello)
             },
             onMessageReceived = { frame ->
-                if (activeWebsocket !== ws) return@ClientTunnelWebsocket
+                if (activeChannel !== channel) return@ClientTunnelWebsocket
                 try {
                     if (!noiseSession.isHandshakeComplete) {
                         noiseSession.processServerHello(frame)
@@ -210,8 +211,8 @@ class ClientTransportManager(
                                 // Send typeShutdown (0x00) to close the hybrid transaction cleanly per PXP §6.2
                                 runCatching { sendEncryptedFrame(byteArrayOf(0x00)) }
 
-                                if (completed.compareAndSet(false, true) && clearActiveSession(ws)) {
-                                    ws.close()
+                                if (completed.compareAndSet(false, true) && clearActiveSession(channel)) {
+                                    channel.close()
                                     onSuccess(parsedResp)
                                 }
                             }
@@ -226,22 +227,23 @@ class ClientTransportManager(
                     }
                 } catch (e: Exception) {
                     Log.e("ClientTransport", "Client transport error", e)
-                    if (completed.compareAndSet(false, true) && clearActiveSession(ws)) {
-                        ws.cancel()
+                    if (completed.compareAndSet(false, true) && clearActiveSession(channel)) {
+                        channel.cancel()
                         onError("Protocol error: ${e.message}")
                     }
                 }
             },
             onStatusUpdate = null,
             onDisconnected = {
-                if (!completed.get() && clearActiveSession(ws)) {
+                if (!completed.get() && clearActiveSession(channel)) {
                     onError("Connection closed before authentication completed.")
                 }
             }
         )
+        channel = ws
 
         synchronized(this) {
-            activeWebsocket = ws
+            activeChannel = channel
             ws.connect()
         }
     }
@@ -252,7 +254,7 @@ class ClientTransportManager(
         sessionTimeoutJob = null
         transportScope.coroutineContext.cancelChildren()
         bleScanner.stopScanning()
-        activeWebsocket?.cancel()
-        activeWebsocket = null
+        activeChannel?.cancel()
+        activeChannel = null
     }
 }

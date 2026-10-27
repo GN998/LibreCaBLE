@@ -1,4 +1,4 @@
-package com.dev.fido.bridge.core.proxy
+package com.dev.fido.bridge.authenticator.proxy
 
 import android.content.Context
 import android.util.Log
@@ -14,7 +14,6 @@ import androidx.credentials.exceptions.domerrors.NotSupportedError
 import androidx.credentials.exceptions.publickeycredential.CreatePublicKeyCredentialDomException
 import androidx.credentials.exceptions.publickeycredential.GetPublicKeyCredentialDomException
 import com.dev.fido.bridge.core.ctap.AuthenticatorInfo
-import com.dev.fido.bridge.core.ctap.mapper.CtapMapper
 import com.dev.fido.bridge.core.ctap.model.Ctap2Request
 import com.dev.fido.bridge.core.ctap.model.Ctap2Response
 import com.dev.fido.bridge.core.ctap.model.CtapStatus

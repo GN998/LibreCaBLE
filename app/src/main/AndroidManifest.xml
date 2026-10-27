@@ -26,7 +26,7 @@
         <!-- Set launchMode to singleTop so subsequent QR scans route to onNewIntent instead of spawning duplicate instances -->
         <!-- Handle configuration changes in-place so CredentialManager bottom sheets or screen rotations do not trigger onDestroy() and tear down active WebSocket tunnels -->
         <activity
-            android:name=".feature.uri.FidoUriHandlerActivity"
+            android:name=".authenticator.ui.FidoUriHandlerActivity"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|uiMode|keyboard|keyboardHidden"
             android:exported="true"
             android:launchMode="singleTop">
@@ -67,7 +67,7 @@
         </service>
 
         <service
-            android:name=".feature.session.BridgeForegroundService"
+            android:name=".core.session.BridgeForegroundService"
             android:exported="false"
             android:foregroundServiceType="connectedDevice" />
     </application>

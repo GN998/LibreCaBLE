@@ -2,7 +2,8 @@ package com.dev.fido.bridge.client.transport.websocket
 
 import android.util.Log
 import com.dev.fido.bridge.core.security.toHex
-import com.dev.fido.bridge.core.transport.websocket.TunnelWebsocket
+import com.dev.fido.bridge.core.transport.PxpDataChannel
+import com.dev.fido.bridge.core.transport.SharedHttpClient
 import okhttp3.Request
 import okhttp3.Response
 import okhttp3.WebSocket
@@ -21,7 +22,7 @@ class ClientTunnelWebsocket(
     private val onMessageReceived: (ByteArray) -> Unit,
     private val onStatusUpdate: ((String) -> Unit)? = null,
     private val onDisconnected: (() -> Unit)? = null
-) {
+) : PxpDataChannel {
     private var webSocket: WebSocket? = null
 
     @Volatile
@@ -37,7 +38,7 @@ class ClientTunnelWebsocket(
             .header("Sec-WebSocket-Protocol", "fido.cable")
             .build()
 
-        webSocket = TunnelWebsocket.sharedClient.newWebSocket(request, object : WebSocketListener() {
+        webSocket = SharedHttpClient.sharedClient.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 val negotiatedSubprotocol = response.header("Sec-WebSocket-Protocol")
                 if (negotiatedSubprotocol != null && !negotiatedSubprotocol.equals("fido.cable", ignoreCase = true)) {
@@ -80,16 +81,16 @@ class ClientTunnelWebsocket(
         })
     }
 
-    fun sendFrame(data: ByteArray) {
+    override fun sendFrame(data: ByteArray) {
         webSocket?.send(data.toByteString())
     }
 
-    fun close() {
+    override fun close() {
         isClientClosed = true
         webSocket?.close(1000, "Closed by client")
     }
 
-    fun cancel() {
+    override fun cancel() {
         isClientClosed = true
         webSocket?.cancel()
     }

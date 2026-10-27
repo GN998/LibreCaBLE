@@ -1,4 +1,4 @@
-package com.dev.fido.bridge.feature.uri
+package com.dev.fido.bridge.authenticator.ui
 
 import android.Manifest
 import android.bluetooth.BluetoothAdapter
@@ -29,11 +29,11 @@ import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
-import com.dev.fido.bridge.core.hybrid.HybridQrParser
+import com.dev.fido.bridge.authenticator.qr.HybridQrParser
+import com.dev.fido.bridge.authenticator.session.BridgeSessionController
+import com.dev.fido.bridge.authenticator.transport.TransportManager
+import com.dev.fido.bridge.authenticator.transport.ble.HybridBleAdvertiser
 import com.dev.fido.bridge.core.security.TunnelConfigManager
-import com.dev.fido.bridge.core.transport.TransportManager
-import com.dev.fido.bridge.core.transport.ble.HybridBleAdvertiser
-import com.dev.fido.bridge.feature.session.BridgeSessionController
 
 class FidoUriHandlerActivity : AppCompatActivity() {
 

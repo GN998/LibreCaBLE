@@ -1,21 +1,17 @@
-package com.dev.fido.bridge.core.transport.websocket
+package com.dev.fido.bridge.authenticator.transport.websocket
 
 import android.util.Log
 import com.dev.fido.bridge.core.security.DomainDerivation
 import com.dev.fido.bridge.core.security.hexToByteArray
 import com.dev.fido.bridge.core.security.toHex
-import com.dev.fido.bridge.core.transport.noise.CryptoHelper
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import okhttp3.OkHttpClient
+import com.dev.fido.bridge.core.transport.PxpDataChannel
+import com.dev.fido.bridge.core.transport.SharedHttpClient
 import okhttp3.Request
 import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import okio.ByteString
 import okio.ByteString.Companion.toByteString
-import java.util.concurrent.TimeUnit
 
 class TunnelWebsocket(
     private val domainId: Int,
@@ -24,32 +20,7 @@ class TunnelWebsocket(
     private val onMessageReceived: (ByteArray) -> Unit,
     private val onStatusUpdate: ((String) -> Unit)? = null,
     private val onDisconnected: (() -> Unit)? = null
-) {
-    companion object {
-        // Initialize OkHttpClient lazily so referencing the companion object in Application.onCreate()
-        // does not synchronously load the system X509TrustManager and SSLContext on the main thread.
-        // Tighten connectTimeout to 10s so OkHttp 4.x route fallback recovers faster when a dual-stack
-        // IPv6 route is unreachable, while keeping readTimeout(0) and 5s pings for background survival.
-        internal val sharedClient: OkHttpClient by lazy {
-            OkHttpClient.Builder()
-                .connectTimeout(10, TimeUnit.SECONDS)
-                .readTimeout(0, TimeUnit.SECONDS)
-                .writeTimeout(30, TimeUnit.SECONDS)
-                .pingInterval(5, TimeUnit.SECONDS)
-                .build()
-        }
-
-        /**
-         * Pre-initialize the OkHttp TLS engine and JCA P-256 curve parameters on a background IO thread
-         * during cold start to eliminate classloading and trust-store overhead without blocking the main thread.
-         */
-        fun warmupLocalCryptoAndTls() {
-            CoroutineScope(Dispatchers.IO).launch {
-                sharedClient
-                CryptoHelper.warmup()
-            }
-        }
-    }
+) : PxpDataChannel {
 
     private var webSocket: WebSocket? = null
 
@@ -68,7 +39,7 @@ class TunnelWebsocket(
             .header("Sec-WebSocket-Protocol", "fido.cable")
             .build()
 
-        webSocket = sharedClient.newWebSocket(request, object : WebSocketListener() {
+        webSocket = SharedHttpClient.sharedClient.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 // Verify the negotiated WebSocket subprotocol matches "fido.cable" per CTAP 2.3 §11.5.1.1.1
                 val negotiatedSubprotocol = response.header("Sec-WebSocket-Protocol")
@@ -136,12 +107,12 @@ class TunnelWebsocket(
         })
     }
 
-    fun sendFrame(data: ByteArray) {
+    override fun sendFrame(data: ByteArray) {
         // Convert ByteArray via Okio extension to avoid redundant array cloning from Kotlin's vararg spread operator
         webSocket?.send(data.toByteString())
     }
 
-    fun close() {
+    override fun close() {
         isClientClosed = true
         webSocket?.close(1000, "Closed by client")
     }
@@ -150,7 +121,7 @@ class TunnelWebsocket(
      * Immediately abort the underlying TCP/TLS call and release socket resources when tearing down
      * an incomplete or superseded session where flushing outbound frames is not required.
      */
-    fun cancel() {
+    override fun cancel() {
         isClientClosed = true
         webSocket?.cancel()
     }

@@ -1,4 +1,4 @@
-package com.dev.fido.bridge.core.transport.ble
+package com.dev.fido.bridge.authenticator.transport.ble
 
 import android.bluetooth.le.AdvertiseCallback
 import android.bluetooth.le.AdvertiseData

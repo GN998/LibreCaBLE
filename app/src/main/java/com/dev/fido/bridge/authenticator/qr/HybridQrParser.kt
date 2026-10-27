@@ -1,4 +1,4 @@
-package com.dev.fido.bridge.core.hybrid
+package com.dev.fido.bridge.authenticator.qr
 
 import com.dev.fido.bridge.core.ctap.codec.CtapCodec
 import com.dev.fido.bridge.core.security.TunnelConfigManager

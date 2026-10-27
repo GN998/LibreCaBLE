@@ -1,4 +1,4 @@
-package com.dev.fido.bridge.core.ctap.mapper
+package com.dev.fido.bridge.authenticator.proxy
 
 import com.dev.fido.bridge.core.ctap.codec.CtapCodec
 import com.dev.fido.bridge.core.ctap.codec.CtapCodec.requireField
