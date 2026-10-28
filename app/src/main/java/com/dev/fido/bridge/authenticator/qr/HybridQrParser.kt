@@ -36,6 +36,14 @@ object HybridQrParser {
                 else -> null
             }?.let { if (it == "mc") "mc" else "ga" } ?: "ga"
 
+            // Parse optional supported transport channels list (Key 6: 0 = WebSockets, 1 = BLE L2CAP)
+            // per PXP §5.3.1, defaulting to WebSockets (0) when absent for backwards compatibility.
+            val supportedTransports = (cborMap[6L] as? List<*>)
+                ?.mapNotNull { (it as? Number)?.toInt() }
+                ?.toSet()
+                ?.takeIf { it.isNotEmpty() }
+                ?: setOf(0)
+
             // In CTAP 2.3 §11.5.1.1, QR CBOR Key 2 is numAssignedDomains, NOT the tunnel server ID.
             // Resolve tunnel server ID dynamically to support user runtime overrides alongside build-time defaults.
             val tunnelServerId = TunnelConfigManager.getEffectiveTunnelId()
@@ -45,7 +53,8 @@ object HybridQrParser {
                 secret = secret,
                 tunnelServerId = tunnelServerId,
                 timestampSeconds = timestampSeconds,
-                operationHint = operationHint
+                operationHint = operationHint,
+                supportedTransports = supportedTransports
             )
         } catch (e: Exception) {
             return null

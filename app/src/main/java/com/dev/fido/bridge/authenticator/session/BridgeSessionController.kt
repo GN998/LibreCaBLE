@@ -32,7 +32,8 @@ class BridgeSessionController(
     fun onQrCodeScanned(
         peerPublicKey: ByteArray,
         psk: ByteArray,
-        domainId: Int
+        domainId: Int,
+        supportedTransports: Set<Int> = setOf(0)
     ) {
         // Terminate any prior transport session first, then cancel pending Main-thread dispatches
         // so no background callback from a previous scan can enqueue after cancelChildren().
@@ -46,7 +47,7 @@ class BridgeSessionController(
             scope.launch { onSessionTerminated?.invoke() }
         }
 
-        transportManager.startSession(peerPublicKey, psk, domainId) { rawCtapRequest ->
+        transportManager.startSession(peerPublicKey, psk, domainId, supportedTransports) { rawCtapRequest ->
             try {
                 val parsedRequest = CtapCodec.decodeRequest(rawCtapRequest)
 

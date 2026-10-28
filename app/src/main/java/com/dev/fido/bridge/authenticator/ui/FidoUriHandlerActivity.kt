@@ -301,8 +301,15 @@ class FidoUriHandlerActivity : AppCompatActivity() {
     private fun initializeController() {
         if (::sessionController.isInitialized) return
 
-        val hybridBleAdvertiser = HybridBleAdvertiser { bluetoothAdapter?.bluetoothLeAdvertiser }
-        sessionController = BridgeSessionController(this, TransportManager(hybridBleAdvertiser)).apply {
+        val hybridBleAdvertiser = HybridBleAdvertiser(
+            advertiserProvider = { bluetoothAdapter?.bluetoothLeAdvertiser },
+            adapterProvider = { bluetoothAdapter }
+        )
+        val transportManager = TransportManager(
+            bleAdvertiser = hybridBleAdvertiser,
+            adapterProvider = { bluetoothAdapter }
+        )
+        sessionController = BridgeSessionController(this, transportManager).apply {
             onStatusUpdate = { status ->
                 updateStatus(status)
             }
@@ -364,7 +371,12 @@ class FidoUriHandlerActivity : AppCompatActivity() {
             }
 
             try {
-                sessionController.onQrCodeScanned(qrData.publicKey, qrData.secret, qrData.tunnelServerId)
+                sessionController.onQrCodeScanned(
+                    peerPublicKey = qrData.publicKey,
+                    psk = qrData.secret,
+                    domainId = qrData.tunnelServerId,
+                    supportedTransports = qrData.supportedTransports
+                )
                 updateStatus("Connecting...")
             } catch (e: Exception) {
                 activeFidoUri = null
