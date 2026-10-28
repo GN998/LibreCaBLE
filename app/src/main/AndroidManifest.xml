@@ -2,10 +2,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
-    <!-- Declare neverForLocation on Android 14+ as BLE proximity advertising/scanning does not derive physical location -->
-    <uses-permission
-        android:name="android.permission.BLUETOOTH_ADVERTISE"
-        android:usesPermissionFlags="neverForLocation" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" />
+    <!-- Assert neverForLocation on BLUETOOTH_SCAN as BLE EID scanning does not derive physical location -->
     <uses-permission
         android:name="android.permission.BLUETOOTH_SCAN"
         android:usesPermissionFlags="neverForLocation" />

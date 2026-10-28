@@ -87,18 +87,19 @@ android {
 }
 
 dependencies {
-    implementation("androidx.core:core-ktx:1.15.0")
-    implementation("androidx.appcompat:appcompat:1.7.0")
+    implementation("androidx.core:core-ktx:1.16.0")
+    implementation("androidx.appcompat:appcompat:1.7.1")
 
     // Android 14+ CredentialManager (Core API)
     // Omit legacy credentials-play-services-auth dependency to prevent unwanted GMS permissions
-    implementation("androidx.credentials:credentials:1.3.0")
+    implementation("androidx.credentials:credentials:1.6.0")
 
     // Coroutines & WebSockets
-    // Match Kotlin 2.x metadata format to prevent binary compatibility warnings during R8 shrinking
+    // Match Kotlin 2.1.x metadata format to prevent binary compatibility warnings during R8 shrinking
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
-    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    // Enforce OkHttp 4.12.1+ to block the 8 compromised eMudhra intermediate CA certificates on AOSP devices without Play Services
+    implementation("com.squareup.okhttp3:okhttp:4.12.1")
 
     // Matrix-only QR code generator for CTAP 2.3 client hybrid flow
-    implementation("com.google.zxing:core:3.5.3")
+    implementation("com.google.zxing:core:3.5.4")
 }
