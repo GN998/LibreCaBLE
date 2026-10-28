@@ -151,6 +151,18 @@ class FidoUriHandlerActivity : AppCompatActivity() {
         }
 
         setContentView(rootFrame)
+        // Evict the transient QR scan task from Recents when the user presses Back or performs a back gesture
+        onBackPressedDispatcher.addCallback(this, object : androidx.activity.OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                if (isQrScanMode) {
+                    finishAndRemoveTask()
+                } else {
+                    isEnabled = false
+                    onBackPressedDispatcher.onBackPressed()
+                }
+            }
+        })
+
         applyUiMode(intent?.dataString != null)
         checkAndRequestPermissions()
     }
