@@ -264,7 +264,7 @@ class ClientTransportManager(
         }
 
         // Prefer direct BLE L2CAP CoC when the authenticator advertises a server PSM in the suffix per PXP §6.1.2,
-        // falling back to WebSockets if the L2CAP socket fails to connect.
+        // falling back to WebSockets only if the authenticator also provided a non-zero tunnel routing ID.
         val psm = advert.serverPsm
         val device = advert.bluetoothDevice
         if (psm != null && device != null) {
@@ -275,9 +275,14 @@ class ClientTransportManager(
                 psm = psm,
                 onConnected = { onChannelConnected(l2cap) },
                 onMessageReceived = { frame -> onChannelMessage(l2cap, frame) },
-                onConnectFailed = {
-                    Log.w("ClientTransport", "L2CAP connection failed; falling back to WebSocket tunnel")
-                    startWebsocketTransport(expectedPriorChannel = l2cap)
+                onConnectFailed = { err ->
+                    val hasValidTunnelRoute = advert.routingId.any { it != 0.toByte() }
+                    if (hasValidTunnelRoute) {
+                        Log.w("ClientTransport", "L2CAP connection failed; falling back to WebSocket tunnel")
+                        startWebsocketTransport(expectedPriorChannel = l2cap)
+                    } else if (clearActiveSession(l2cap)) {
+                        onError("BLE L2CAP connection failed: ${err.message ?: "I/O error"}")
+                    }
                 },
                 onDisconnected = { onChannelDisconnected(l2cap) }
             )

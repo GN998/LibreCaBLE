@@ -8,7 +8,6 @@ import com.dev.fido.bridge.core.transport.PxpDataChannel
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
@@ -44,9 +43,6 @@ class ClientL2capChannel(
     private var socket: BluetoothSocket? = null
 
     @Volatile
-    private var writerJob: Job? = null
-
-    @Volatile
     private var isClientClosed = false
 
     @SuppressLint("MissingPermission")
@@ -59,12 +55,6 @@ class ClientL2capChannel(
                     Log.e("ClientL2capChannel", "Failed to create L2CAP socket on PSM $psm", t)
                     onConnectFailed(t)
                 }
-                return@launch
-            }
-
-            // Close immediately if cancel() raced with socket creation before connect() started
-            if (isClientClosed) {
-                runCatching { l2capSocket.close() }
                 return@launch
             }
 
@@ -83,8 +73,9 @@ class ClientL2capChannel(
             val input = DataInputStream(l2capSocket.inputStream)
             val output = DataOutputStream(l2capSocket.outputStream)
 
-            // Launch dedicated writer coroutine to serialize 4-byte big-endian length-prefixed frames sequentially
-            writerJob = launch {
+            // Serialize 4-byte big-endian length-prefixed frames sequentially; closing outboundQueue
+            // flushes any remaining frames (e.g., 0x00 typeShutdown) before closing the socket in finally.
+            launch {
                 try {
                     for (payload in outboundQueue) {
                         output.writeInt(payload.size)
@@ -96,6 +87,10 @@ class ClientL2capChannel(
                 } catch (e: IOException) {
                     if (!isClientClosed) {
                         Log.w("ClientL2capChannel", "L2CAP write stream closed", e)
+                    }
+                } finally {
+                    if (isClientClosed) {
+                        runCatching { l2capSocket.close() }
                     }
                 }
             }
@@ -133,13 +128,8 @@ class ClientL2capChannel(
 
     override fun close() {
         isClientClosed = true
+        // Closing the channel signals the writer loop to flush pending frames and close the socket
         outboundQueue.close()
-        // Drain queued outbound frames (e.g., 0x00 typeShutdown) on the writer coroutine before closing the socket
-        channelScope.launch {
-            runCatching { writerJob?.join() }
-            runCatching { socket?.close() }
-            channelScope.cancel()
-        }
     }
 
     override fun cancel() {
