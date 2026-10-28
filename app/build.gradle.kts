@@ -1,3 +1,4 @@
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import java.util.Properties
 
 plugins {
@@ -76,13 +77,16 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    kotlinOptions {
-        jvmTarget = "17"
-    }
-
     buildFeatures {
         // Disable viewBinding as UI is constructed programmatically, reducing build overhead
         buildConfig = true
+    }
+}
+
+// Configure Kotlin 2.1+ bytecode target using the modern compilerOptions DSL
+kotlin {
+    compilerOptions {
+        jvmTarget.set(JvmTarget.JVM_17)
     }
 }
 
