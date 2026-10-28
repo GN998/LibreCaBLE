@@ -92,7 +92,7 @@ dependencies {
 
     // Android 14+ CredentialManager (Core API)
     // Omit legacy credentials-play-services-auth dependency to prevent unwanted GMS permissions
-    implementation("androidx.credentials:credentials:1.6.0")
+    implementation("androidx.credentials:credentials:1.3.0")
 
     // Coroutines & WebSockets
     // Match Kotlin 2.1.x metadata format to prevent binary compatibility warnings during R8 shrinking
