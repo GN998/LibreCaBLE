@@ -227,7 +227,8 @@ class FidoUriHandlerActivity : AppCompatActivity() {
         } else if (item.itemId == 2) {
             try {
                 val pendingIntent = androidx.credentials.CredentialManager.create(this).createSettingsPendingIntent()
-                startIntentSenderForResult(pendingIntent.intentSender, 1002, null, 0, 0, 0)
+                // Launch system credential provider settings directly without deprecated result tracking
+                startIntentSender(pendingIntent.intentSender, null, 0, 0, 0)
             } catch (e: Exception) {
                 Toast.makeText(this, "Open Settings > Passwords & passkeys to enable Passkey Bridge", Toast.LENGTH_LONG).show()
             }
