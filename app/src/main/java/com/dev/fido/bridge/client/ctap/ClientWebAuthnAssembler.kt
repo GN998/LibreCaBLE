@@ -222,7 +222,8 @@ object ClientWebAuthnAssembler {
                 put("clientDataJSON", CryptoUtils.encodeBase64UrlNoPadding(clientDataJsonBytes))
                 put("authenticatorData", CryptoUtils.encodeBase64UrlNoPadding(effectiveAuthData))
                 put("attestationObject", CryptoUtils.encodeBase64UrlNoPadding(attestationObjectBytes))
-                put("transports", JSONArray(listOf("hybrid", "internal")))
+                // Include hardware and platform transports matching AuthenticatorInfo so relying parties permit subsequent USB, NFC, or hybrid assertions
+                put("transports", JSONArray(listOf("hybrid", "internal", "nfc", "usb")))
                 put("publicKeyAlgorithm", parsedAuthData.coseAlgorithm)
                 parsedAuthData.spkiPublicKeyBytes?.let { spki ->
                     put("publicKey", CryptoUtils.encodeBase64UrlNoPadding(spki))
