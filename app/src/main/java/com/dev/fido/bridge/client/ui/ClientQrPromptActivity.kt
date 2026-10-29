@@ -35,6 +35,10 @@ import androidx.credentials.exceptions.GetCredentialCancellationException
 import androidx.credentials.exceptions.GetCredentialCustomException
 import androidx.credentials.exceptions.GetCredentialUnknownException
 import androidx.credentials.exceptions.NoCredentialException
+import androidx.credentials.exceptions.domerrors.InvalidStateError
+import androidx.credentials.exceptions.domerrors.NotSupportedError
+import androidx.credentials.exceptions.publickeycredential.CreatePublicKeyCredentialDomException
+import androidx.credentials.exceptions.publickeycredential.GetPublicKeyCredentialDomException
 import androidx.credentials.provider.PendingIntentHandler
 import com.dev.fido.bridge.client.ctap.ClientWebAuthnAssembler
 import com.dev.fido.bridge.client.ctap.PreparedClientCeremony
@@ -358,16 +362,19 @@ class ClientQrPromptActivity : AppCompatActivity() {
                 Log.w("ClientQrPrompt", "Authenticator returned CTAP error status: $statusHex")
                 val resultIntent = Intent()
                 if (isCreateMode) {
-                    val exc = if (response.errorCode == CtapStatus.ERR_OPERATION_DENIED) {
-                        CreateCredentialCancellationException("Operation denied on authenticator ($statusHex)")
-                    } else {
-                        CreateCredentialUnknownException("Authenticator returned CTAP error $statusHex")
+                    // Translate CTAP2 protocol errors back into standard WebAuthn DOMExceptions per W3C WebAuthn §6.3.2
+                    val exc = when (response.errorCode) {
+                        CtapStatus.ERR_OPERATION_DENIED -> CreateCredentialCancellationException("Operation denied on authenticator ($statusHex)")
+                        CtapStatus.ERR_CREDENTIAL_EXCLUDED -> CreatePublicKeyCredentialDomException(InvalidStateError(), "Credential excluded ($statusHex)")
+                        CtapStatus.ERR_UNSUPPORTED_ALGORITHM -> CreatePublicKeyCredentialDomException(NotSupportedError(), "Unsupported algorithm ($statusHex)")
+                        else -> CreateCredentialUnknownException("Authenticator returned CTAP error $statusHex")
                     }
                     PendingIntentHandler.setCreateCredentialException(resultIntent, exc)
                 } else {
                     val exc = when (response.errorCode) {
                         CtapStatus.ERR_NO_CREDENTIALS -> NoCredentialException("No matching credentials on authenticator")
                         CtapStatus.ERR_OPERATION_DENIED -> GetCredentialCancellationException("Operation denied on authenticator ($statusHex)")
+                        CtapStatus.ERR_UNSUPPORTED_ALGORITHM -> GetPublicKeyCredentialDomException(NotSupportedError(), "Unsupported algorithm ($statusHex)")
                         else -> GetCredentialUnknownException("Authenticator returned CTAP error $statusHex")
                     }
                     PendingIntentHandler.setGetCredentialException(resultIntent, exc)

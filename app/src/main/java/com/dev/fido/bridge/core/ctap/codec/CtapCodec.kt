@@ -308,17 +308,15 @@ object CtapCodec {
                 if (pos >= bytes.size) throw CtapCodecException(CtapStatus.ERR_INVALID_CBOR, "Unexpected end of CBOR stream")
                 return bytes[pos++].toInt() and 0xFF
             }
-            // Validate 64-bit unsigned CBOR length fits within a non-negative 32-bit JVM array/collection bound
+            // Bound declared CBOR item length against remaining unconsumed stream bytes to prevent 32-bit addition overflow and oversized loops
             fun requireIntLength(v: Long): Int {
-                if (v < 0L || v > Int.MAX_VALUE) {
+                val remaining = bytes.size - pos
+                if (v < 0L || v > remaining.toLong()) {
                     throw CtapCodecException(CtapStatus.ERR_INVALID_CBOR, "CBOR item length overflow: $v")
                 }
                 return v.toInt()
             }
             fun readBytes(len: Int): ByteArray {
-                if (pos + len > bytes.size) {
-                    throw CtapCodecException(CtapStatus.ERR_INVALID_CBOR, "Invalid CBOR byte string length: $len")
-                }
                 val res = bytes.copyOfRange(pos, pos + len)
                 pos += len
                 return res
