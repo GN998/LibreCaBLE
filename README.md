@@ -1,7 +1,7 @@
-# Passkey Bridge
+# LibreCaBLE
 ![Vibe Coded](https://img.shields.io/badge/LLM-Vibe_Coded-orange)
 
-A lightweight, GMS-free FIDO2 hybrid transport (`caBLE v2` / CTAP 2.3 §11.5) implementation for Android 14+ (API 34+). It enables an Android device to operate as both a **Credential Manager Hosting Device (CMHD / Roaming Authenticator)** and a **Client Platform** for QR-initiated cross-device WebAuthn ceremonies.
+LibreCaBLE is a lightweight, GMS-free FIDO2 hybrid transport (caBLE v2 / CTAP 2.3 §11.5) and Proximity Transfer Protocol (PXP) implementation for Android 14+ (API 34+). It enables an Android device to operate as both a Credential Manager Hosting Device (CMHD / Roaming Authenticator) and a Client Platform for QR-initiated cross-device WebAuthn ceremonies over BLE L2CAP and WebSocket relay tunnels.
 
 ## Core Features
 
@@ -15,7 +15,7 @@ A lightweight, GMS-free FIDO2 hybrid transport (`caBLE v2` / CTAP 2.3 §11.5) im
 2. **CMHD (Authenticator) Mode**:
    * App signing certificate SHA-256 fingerprint must be allowlisted in your local credential provider (e.g., Bitwarden) to permit `CREDENTIAL_MANAGER_SET_ORIGIN` (untrusted calls return `CTAP2_ERR_OPERATION_DENIED` / `0x27`).
    * An external camera or QR scanner app that dispatches `VIEW` intents for `FIDO:/` URIs.
-3. **Client Platform Mode**: Enable **Passkey Bridge** in Android *Settings > Passwords & passkeys* (or via the in-app menu).
+3. **Client Platform Mode**: Enable **LibreCaBLE** in Android *Settings > Passwords & passkeys* (or via the in-app menu).
 
 ## License & Acknowledgments
 
