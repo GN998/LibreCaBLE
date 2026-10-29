@@ -341,7 +341,8 @@ object ClientWebAuthnAssembler {
                 put("androidPackageName", packageName)
             }
         }
-        return obj.toString().toByteArray(Charsets.UTF_8)
+        // Unescape forward slashes escaped by Android's JSONObject so serialized origin URLs comply with WebAuthn §5.8.1.1 CCDToString rules
+        return obj.toString().replace("\\/", "/").toByteArray(Charsets.UTF_8)
     }
 
     private fun JSONArray.toDescriptorList(): List<CredentialDescriptor> {
