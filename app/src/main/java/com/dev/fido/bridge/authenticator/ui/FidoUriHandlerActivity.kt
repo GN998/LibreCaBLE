@@ -230,8 +230,8 @@ class FidoUriHandlerActivity : AppCompatActivity() {
                 // Launch system credential provider settings directly without deprecated result tracking
                 startIntentSender(pendingIntent.intentSender, null, 0, 0, 0)
             } catch (e: Exception) {
-                Toast.makeText(this, "Open Settings > Passwords & passkeys to enable Passkey Bridge", Toast.LENGTH_LONG).show()
-            }
+            Toast.makeText(this, "Open Settings > Passwords & passkeys to enable LibreCaBLE", Toast.LENGTH_LONG).show()
+        }
             return true
         }
         return super.onOptionsItemSelected(item)

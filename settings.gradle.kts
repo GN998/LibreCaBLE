@@ -14,5 +14,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "PasskeyBridge"
+rootProject.name = "LibreCaBLE"
 include(":app")

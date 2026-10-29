@@ -12,6 +12,6 @@ class BridgeApplication : Application() {
         TunnelConfigManager.init(this)
         // Pre-warm OkHttp TLS provider and P-256 curve parameters in the background without emitting network traffic
         SharedHttpClient.warmupLocalCryptoAndTls()
-        Log.d("BridgeApplication", "Passkey Bridge Application initialized.")
+        Log.d("BridgeApplication", "LibreCaBLE Application initialized.")
     }
 }

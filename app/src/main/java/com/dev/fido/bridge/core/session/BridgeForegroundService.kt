@@ -32,7 +32,7 @@ class BridgeForegroundService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val notification = Notification.Builder(this, CHANNEL_ID)
-            .setContentTitle("Passkey Bridge")
+            .setContentTitle("LibreCaBLE")
             .setContentText("Authenticating with nearby device...")
             .setSmallIcon(applicationInfo.icon)
             .setOngoing(true)

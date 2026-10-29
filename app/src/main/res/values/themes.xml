@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!-- Configure translucent window by default for zero-flicker QR bottom-sheet launches; launcher mode restores opacity at runtime -->
-    <style name="Theme.PasskeyBridge" parent="Theme.AppCompat">
+    <style name="Theme.LibreCaBLE" parent="Theme.AppCompat">
         <item name="colorPrimary">#0F172A</item>
         <item name="colorPrimaryDark">#020617</item>
         <item name="colorAccent">@android:color/system_accent1_300</item>

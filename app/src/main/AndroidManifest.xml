@@ -16,10 +16,10 @@
         android:name=".BridgeApplication"
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
-        android:label="Passkey Bridge"
+        android:label="LibreCaBLE"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
-        android:theme="@style/Theme.PasskeyBridge">
+        android:theme="@style/Theme.LibreCaBLE">
 
         <!-- Set launchMode to singleTop so subsequent QR scans route to onNewIntent instead of spawning duplicate instances -->
         <!-- Handle configuration changes in-place so CredentialManager bottom sheets or screen rotations do not trigger onDestroy() and tear down active WebSocket tunnels -->
@@ -47,14 +47,14 @@
             android:name=".client.ui.ClientQrPromptActivity"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|uiMode|keyboard|keyboardHidden"
             android:exported="false"
-            android:theme="@style/Theme.PasskeyBridge" />
+            android:theme="@style/Theme.LibreCaBLE" />
 
         <!-- Android 14+ Credential Provider service for client-mode hybrid QR presentation -->
         <service
             android:name=".client.provider.BridgeCredentialProviderService"
             android:enabled="true"
             android:exported="true"
-            android:label="Passkey Bridge"
+            android:label="LibreCaBLE"
             android:permission="android.permission.BIND_CREDENTIAL_PROVIDER_SERVICE">
             <intent-filter>
                 <action android:name="android.service.credentials.CredentialProviderService" />

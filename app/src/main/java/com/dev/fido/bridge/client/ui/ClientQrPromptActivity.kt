@@ -50,7 +50,7 @@ import com.dev.fido.bridge.core.session.BridgeForegroundService
 
 /**
  * Translucent bottom-sheet Activity invoked by Android CredentialManager when the user selects
- * Passkey Bridge as the credential provider. Displays the FIDO:/ QR code and orchestrates the
+ * LibreCaBLE as the credential provider. Displays the FIDO:/ QR code and orchestrates the
  * PXP client session.
  */
 class ClientQrPromptActivity : AppCompatActivity() {
