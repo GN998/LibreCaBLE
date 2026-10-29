@@ -66,7 +66,7 @@ jobs:
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
           gradle assembleRelease --stacktrace --parallel --no-daemon
-          mv app/build/outputs/apk/release/app-release.apk "app/build/outputs/apk/release/passkey-bridge-${SHORT_SHA}.apk"
+          mv app/build/outputs/apk/release/app-release.apk "app/build/outputs/apk/release/librecable-${SHORT_SHA}.apk"
 
       # ==========================================
       # 3. Artifact Upload
@@ -74,7 +74,7 @@ jobs:
       - name: Upload Release APK
         uses: actions/upload-artifact@v7
         with:
-          name: passkey-bridge-release-apk-${{ env.SHORT_SHA }}
-          path: app/build/outputs/apk/release/passkey-bridge-${{ env.SHORT_SHA }}.apk
+          name: librecable-release-apk-${{ env.SHORT_SHA }}
+          path: app/build/outputs/apk/release/librecable-${{ env.SHORT_SHA }}.apk
           if-no-files-found: error
           retention-days: 7
