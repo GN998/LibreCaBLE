@@ -325,7 +325,13 @@ class TransportManager(
                         }
                     },
                     onMessageReceived = { frame -> handleInboundFrame(sessionWs, frame) },
-                    onStatusUpdate = null,
+                    // Forward WebSocket errors only while sessionWs is the active channel so post-completion
+                    // peer TCP resets or superseded sessions cannot trigger false error Toasts.
+                    onStatusUpdate = { wsStatus ->
+                        if (activeChannel === sessionWs && wsStatus.startsWith("WebSocket Error:")) {
+                            onStatusUpdate?.invoke(wsStatus)
+                        }
+                    },
                     onDisconnected = {
                         if (clearActiveSession(sessionWs)) {
                             bleAdvertiser.stopAdvertising()
