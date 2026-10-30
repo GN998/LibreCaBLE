@@ -3,7 +3,6 @@ import java.util.Properties
 
 plugins {
     id("com.android.application")
-    id("org.jetbrains.kotlin.android")
 }
 
 val localProperties = Properties().apply {
@@ -24,8 +23,8 @@ println("--> [Gradle Build Config] Successfully resolved TUNNEL_ID: $tunnelId")
 
 android {
     namespace = "com.dev.fido.bridge"
-    // Target API 35 for modern AGP and AndroidX compatibility while preserving Android 14+ (API 34) runtime floor
-    compileSdk = 35
+    // Compile against API 37 required by OkHttp 5.5.1 AAR metadata while preserving Android 14+ (API 34) runtime floor
+    compileSdk = 37
 
     // Enforce deterministic APK signing certificate so external credential providers
     // (e.g., Authnkey, Bitwarden) can reliably verify the app's SHA-256 fingerprint allowlist.
@@ -83,7 +82,7 @@ android {
     }
 }
 
-// Configure Kotlin 2.1+ bytecode target using the modern compilerOptions DSL
+// Configure Kotlin bytecode target using the modern compilerOptions DSL
 kotlin {
     compilerOptions {
         jvmTarget.set(JvmTarget.JVM_17)
@@ -99,10 +98,10 @@ dependencies {
     implementation("androidx.credentials:credentials:1.3.0")
 
     // Coroutines & WebSockets
-    // Match Kotlin 2.1.x metadata format to prevent binary compatibility warnings during R8 shrinking
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
-    // Enforce OkHttp 4.12.1+ to block the 8 compromised eMudhra intermediate CA certificates on AOSP devices without Play Services
-    implementation("com.squareup.okhttp3:okhttp:4.12.1")
+    // Use OkHttp 5.x for native RFC 8305 Happy Eyeballs (fastFallback) dual-stack route racing
+    // while retaining the eMudhra intermediate CA blocklist on AOSP devices
+    implementation("com.squareup.okhttp3:okhttp:5.5.1")
 
     // Matrix-only QR code generator for CTAP 2.3 client hybrid flow
     implementation("com.google.zxing:core:3.5.4")
