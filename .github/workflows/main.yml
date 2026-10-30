@@ -44,9 +44,9 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v5
         with:
-          # Explicitly provision Gradle 8.14.5 into system PATH and disable remote cache
+          # Explicitly provision Gradle 9.4.1 into system PATH and disable remote cache
           # to prevent GitHub Actions cache egress quota RestErrors.
-          gradle-version: '8.14.5'
+          gradle-version: '9.4.1'
           cache-disabled: true
 
       # ==========================================
