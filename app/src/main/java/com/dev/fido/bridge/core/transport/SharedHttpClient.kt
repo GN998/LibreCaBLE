@@ -13,8 +13,8 @@ import java.util.concurrent.TimeUnit
 object SharedHttpClient {
     // Initialize OkHttpClient lazily so referencing this object in Application.onCreate()
     // does not synchronously load the system X509TrustManager and SSLContext on the main thread.
-    // Tighten connectTimeout to 10s so OkHttp 4.x route fallback recovers faster when a dual-stack
-    // IPv6 route is unreachable, while keeping readTimeout(0) and 5s pings for background survival.
+    // OkHttp 5.x enables RFC 8305 Happy Eyeballs (fastFallback) by default so unreachable IPv6
+    // routes fall back to IPv4 within 250ms instead of blocking for the full 10s connectTimeout.
     val sharedClient: OkHttpClient by lazy {
         OkHttpClient.Builder()
             .connectTimeout(10, TimeUnit.SECONDS)
