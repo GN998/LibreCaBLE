@@ -1,5 +1,5 @@
-# LibreCaBLE
-![Vibe Coded](https://img.shields.io/badge/LLM-Vibe_Coded-orange)
+# LibreCaBLE (Proof of Concept)
+![Vibe Coded](https://img.shields.io/badge/LLM-Vibe_Coded-orange) 
 
 LibreCaBLE is a lightweight, GMS-free FIDO2 hybrid transport (caBLE v2 / CTAP 2.3 §11.5) and Proximity Transfer Protocol (PXP) implementation for Android 14+ (API 34+). It enables an Android device to operate as both a Credential Manager Hosting Device (CMHD / Roaming Authenticator) and a Client Platform for QR-initiated cross-device WebAuthn ceremonies over BLE L2CAP and WebSocket relay tunnels.
 
