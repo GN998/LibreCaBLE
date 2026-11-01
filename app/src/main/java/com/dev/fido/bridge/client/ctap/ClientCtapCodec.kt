@@ -127,6 +127,10 @@ object ClientCtapCodec {
             0x01.toByte() -> {
                 val fmt = map.requireField<String>(1L, "MakeCredential.fmt")
                 val authData = map.requireField<ByteArray>(2L, "MakeCredential.authData")
+                // Enforce minimum 55-byte attested authData with AT flag (0x40) set per WebAuthn §6.1 & §6.5.1
+                if (authData.size < 55 || (authData[32].toInt() and 0x40) == 0) {
+                    throw CtapCodecException(CtapStatus.ERR_INVALID_CBOR, "Invalid MakeCredential authData")
+                }
                 val attStmt = map.requireField<Map<*, *>>(3L, "MakeCredential.attStmt")
                 Ctap2Response.MakeCredentialResponse(fmt = fmt, authData = authData, attStmt = attStmt)
             }
@@ -135,6 +139,10 @@ object ClientCtapCodec {
                 val credentialId = (credMap?.get("id") as? ByteArray) ?: ByteArray(0)
                 val authData = map.requireField<ByteArray>(2L, "GetAssertion.authData")
                 val signature = map.requireField<ByteArray>(3L, "GetAssertion.signature")
+                // Enforce minimum 37-byte authData and non-empty signature per WebAuthn §6.1 & CTAP 2.3 §6.2
+                if (authData.size < 37 || signature.isEmpty()) {
+                    throw CtapCodecException(CtapStatus.ERR_INVALID_CBOR, "Invalid GetAssertion authData or signature")
+                }
                 val userMap = map[4L] as? Map<*, *>
                 val userHandle = userMap?.get("id") as? ByteArray
                 val userSelected = map[6L] == true
