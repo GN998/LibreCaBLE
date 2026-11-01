@@ -215,8 +215,11 @@ class FidoUriHandlerActivity : AppCompatActivity() {
     }
 
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
-        menu.add(Menu.NONE, 1, Menu.NONE, "⚙").setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS)
-        menu.add(Menu.NONE, 2, Menu.NONE, "Enable Client Provider").setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER)
+        // Group all actions inside the overflow menu with paired leading icons for vertical text alignment
+        menu.add(Menu.NONE, 2, Menu.NONE, "🔑 Enable Client Provider")
+            .setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER)
+        menu.add(Menu.NONE, 1, Menu.NONE, "⚙ Extended Domain Settings")
+            .setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER)
         return true
     }
 
@@ -230,8 +233,8 @@ class FidoUriHandlerActivity : AppCompatActivity() {
                 // Launch system credential provider settings directly without deprecated result tracking
                 startIntentSender(pendingIntent.intentSender, null, 0, 0, 0)
             } catch (e: Exception) {
-            Toast.makeText(this, "Open Settings > Passwords & passkeys to enable LibreCaBLE", Toast.LENGTH_LONG).show()
-        }
+                Toast.makeText(this, "Open Settings > Passwords & passkeys to enable LibreCaBLE", Toast.LENGTH_LONG).show()
+            }
             return true
         }
         return super.onOptionsItemSelected(item)
@@ -397,7 +400,11 @@ class FidoUriHandlerActivity : AppCompatActivity() {
                 updateStatus("Error: ${e.message}")
             }
         } else if (activeFidoUri == null) {
-            updateStatus("Ready to scan FIDO QR code.", resetTerminal = true)
+            // Format idle guidance with explicit line breaks so monospace text never wraps mid-phrase
+            updateStatus(
+                "Ready to scan FIDO QR code.\n\n➜ Enable Client Provider\n  Tap ⋮ in the top-right menu.",
+                resetTerminal = true
+            )
         }
     }
 
