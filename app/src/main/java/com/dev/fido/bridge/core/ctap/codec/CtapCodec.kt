@@ -90,6 +90,10 @@ object CtapCodec {
             ?: throw CtapCodecException(CtapStatus.ERR_INVALID_CBOR, "MakeCredential request must be a CBOR map")
 
         val clientDataHash = map.requireField<ByteArray>(1L, "clientDataHash")
+        // Enforce 32-byte SHA-256 clientDataHash length before dispatching to Android CredentialManager
+        if (clientDataHash.size != 32) {
+            throw CtapCodecException(CtapStatus.ERR_INVALID_LENGTH, "clientDataHash must be 32 bytes")
+        }
 
         val rp = map.requireField<Map<*, *>>(2L, "rp")
         val rpId = rp.requireField<String>("id", "rp.id", CtapStatus.ERR_CBOR_UNEXPECTED_TYPE)
@@ -99,6 +103,10 @@ object CtapCodec {
 
         val user = map.requireField<Map<*, *>>(3L, "user")
         val userId = user.requireField<ByteArray>("id", "user.id", CtapStatus.ERR_CBOR_UNEXPECTED_TYPE)
+        // Enforce WebAuthn §5.4.3 user handle length bounds (1..64 bytes)
+        if (userId.isEmpty() || userId.size > 64) {
+            throw CtapCodecException(CtapStatus.ERR_INVALID_LENGTH, "user.id must be 1..64 bytes")
+        }
         val userName = user["name"]?.let {
             it as? String ?: throw CtapCodecException(CtapStatus.ERR_CBOR_UNEXPECTED_TYPE, "Unexpected CBOR type for user.name")
         } ?: ""
@@ -168,6 +176,10 @@ object CtapCodec {
 
         val rpId = map.requireField<String>(1L, "rpId")
         val clientDataHash = map.requireField<ByteArray>(2L, "clientDataHash")
+        // Enforce 32-byte SHA-256 clientDataHash length before dispatching to Android CredentialManager
+        if (clientDataHash.size != 32) {
+            throw CtapCodecException(CtapStatus.ERR_INVALID_LENGTH, "clientDataHash must be 32 bytes")
+        }
 
         val allowList = parseDescriptorList(map[3L], "allowList")
 
@@ -322,10 +334,6 @@ object CtapCodec {
                 return res
             }
             fun readItem(depth: Int): Any? {
-                // Enforce CTAP 2.3 §8 maximum CBOR nesting depth of 4 levels for wire commands, or 8 for internal attestation statements
-                if (depth > maxDepth) {
-                    throw CtapCodecException(CtapStatus.ERR_INVALID_CBOR, "CBOR nesting depth exceeds limit of $maxDepth")
-                }
                 val b = readByte()
                 val majorType = b shr 5
                 val info = b and 0x1F
@@ -380,12 +388,19 @@ object CtapCodec {
                     2 -> readBytes(requireIntLength(value))
                     3 -> String(readBytes(requireIntLength(value)), Charsets.UTF_8)
                     4 -> {
+                        // Enforce CTAP 2.3 §8 maximum CBOR container nesting depth (4 levels for wire commands)
+                        if (depth >= maxDepth) {
+                            throw CtapCodecException(CtapStatus.ERR_INVALID_CBOR, "CBOR nesting depth exceeds limit of $maxDepth")
+                        }
                         val len = requireIntLength(value)
                         val list = mutableListOf<Any?>()
                         for (i in 0 until len) list.add(readItem(depth + 1))
                         list
                     }
                     5 -> {
+                        if (depth >= maxDepth) {
+                            throw CtapCodecException(CtapStatus.ERR_INVALID_CBOR, "CBOR nesting depth exceeds limit of $maxDepth")
+                        }
                         val len = requireIntLength(value)
                         val map = linkedMapOf<Any?, Any?>()
                         for (i in 0 until len) {

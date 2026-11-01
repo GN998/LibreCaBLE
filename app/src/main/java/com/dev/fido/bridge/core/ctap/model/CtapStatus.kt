@@ -5,6 +5,7 @@ object CtapStatus {
     const val SUCCESS: Byte = 0x00
     const val ERR_INVALID_COMMAND: Byte = 0x01
     const val ERR_INVALID_PARAMETER: Byte = 0x02
+    const val ERR_INVALID_LENGTH: Byte = 0x03
     const val ERR_CHANNEL_BUSY: Byte = 0x06
     const val ERR_CBOR_UNEXPECTED_TYPE: Byte = 0x11
     const val ERR_INVALID_CBOR: Byte = 0x12
