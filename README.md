@@ -1,13 +1,13 @@
 # LibreCaBLE (Proof of Concept)
 ![Vibe Coded](https://img.shields.io/badge/LLM-Vibe_Coded-orange) 
 
-LibreCaBLE is a lightweight, GMS-free FIDO2 hybrid transport (caBLE v2 / CTAP 2.3 §11.5) and Proximity Transfer Protocol (PXP) implementation for Android 14+ (API 34+). It enables an Android device to operate as both a Credential Manager Hosting Device (CMHD / Roaming Authenticator) and a Client Platform for QR-initiated cross-device WebAuthn ceremonies over BLE L2CAP and WebSocket relay tunnels.
+LibreCaBLE is a lightweight, GMS-free FIDO2 hybrid transport (caBLE v2 / CTAP 2.3 §11.5) and Proximity Exchange Protocol (PXP) implementation for Android 14+ (API 34+). It enables an Android device to operate as both a Credential Manager Hosting Device (CMHD / Roaming Authenticator) and a Client Platform for QR-initiated cross-device WebAuthn ceremonies over BLE L2CAP and WebSocket relay tunnels.
 
 ## Core Features
 
 * **CMHD / Roaming Authenticator Mode**: Handles `FIDO:/` URIs for QR-initiated transactions (CTAP 2.3 §11.5.1), broadcasts `0xFFF9` BLE proximity advertisements, and dispatches CTAP2 commands to Android's `CredentialManager` with privileged `origin` and `clientDataHash` binding.
 * **Client Platform Mode**: Implements Android's `CredentialProviderService` to initiate hybrid ceremonies, rendering digit-encoded `FIDO:/` QR payloads, scanning for `0xFFF9` BLE advertisements, and assembling WebAuthn responses (`COSE_Key` to SPKI conversion, `credProps`, and `privileged_apps.json` origin verification).
-* **CTAP 2.3 Hybrid Transport & Encoding**: Full `Noise_KNpsk0_P256_AESGCM_SHA256` handshakes, WebSocket tunnel domain derivation (assigned ID `0` or hashed IDs `256–65535`), and a zero-dependency **CTAP2 canonical CBOR** codec supporting `authenticatorMakeCredential (0x01)`, `authenticatorGetAssertion (0x02)`, `authenticatorGetInfo (0x04)`, and `authenticatorSelection (0x0B)`.
+* **CTAP 2.3 Hybrid Transport & Encoding**: Full `Noise_KNpsk0_P256_AESGCM_SHA256` handshakes, direct BLE L2CAP CoC channels with automatic WebSocket tunnel fallback (assigned ID `0` or hashed IDs `256–65535`), and a zero-dependency **CTAP2 canonical CBOR** codec supporting `authenticatorMakeCredential (0x01)`, `authenticatorGetAssertion (0x02)`, `authenticatorGetInfo (0x04)`, and `authenticatorSelection (0x0B)`.
 
 ## Requirements
 
