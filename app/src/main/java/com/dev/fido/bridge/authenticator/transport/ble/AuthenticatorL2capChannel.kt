@@ -102,9 +102,8 @@ class AuthenticatorL2capChannel(
                         Log.w("AuthL2capChannel", "L2CAP write stream closed", e)
                     }
                 } finally {
-                    if (isClosed) {
-                        runCatching { clientSocket.close() }
-                    }
+                    // Close socket on writer exit to unblock any concurrent readInt() call
+                    runCatching { clientSocket.close() }
                 }
             }
 

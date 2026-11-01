@@ -89,9 +89,8 @@ class ClientL2capChannel(
                         Log.w("ClientL2capChannel", "L2CAP write stream closed", e)
                     }
                 } finally {
-                    if (isClientClosed) {
-                        runCatching { l2capSocket.close() }
-                    }
+                    // Close socket on writer exit to unblock any concurrent readInt() call
+                    runCatching { l2capSocket.close() }
                 }
             }
 
