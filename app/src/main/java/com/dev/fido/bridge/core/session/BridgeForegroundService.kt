@@ -7,6 +7,7 @@ import android.app.Service
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.IBinder
+import android.util.Log
 
 /**
  * Maintain foreground process priority (oom_adj <= 200) during active caBLE sessions so full-screen
@@ -38,11 +39,18 @@ class BridgeForegroundService : Service() {
             .setOngoing(true)
             .build()
 
-        startForeground(
-            NOTIFICATION_ID,
-            notification,
-            ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
-        )
+        // Catch ForegroundServiceStartNotAllowedException or SecurityException if the transient
+        // prompt Activity finishes before the system dispatches onStartCommand.
+        try {
+            startForeground(
+                NOTIFICATION_ID,
+                notification,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
+            )
+        } catch (e: Exception) {
+            Log.w("BridgeForegroundService", "Failed to promote service to foreground", e)
+            stopSelf(startId)
+        }
         return START_NOT_STICKY
     }
 
