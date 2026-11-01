@@ -250,7 +250,10 @@ class ClientQrPromptActivity : AppCompatActivity() {
 
         titleView.text = if (isCreateMode) "Create Passkey" else "Sign In"
 
-        val qrSession = HybridQrGenerator.generateQrSession(prepared.operationHint)
+        val qrSession = HybridQrGenerator.generateQrSession(
+            operationHint = prepared.operationHint,
+            supportBleL2cap = adapter.isLeExtendedAdvertisingSupported
+        )
 
         // Dispatch physical BLE scanning first before rendering the 230dp QR bitmap
         transportManager.startClientSession(

@@ -31,8 +31,12 @@ object HybridQrGenerator {
      * per CTAP 2.3 §11.5.1.1.
      *
      * @param operationHint "ga" for getAssertion or "mc" for makeCredential.
+     * @param supportBleL2cap Whether the local controller supports BLE Extended Advertising required to receive the L2CAP PSM suffix per PXP §5.4.1.
      */
-    fun generateQrSession(operationHint: String = "ga"): ClientQrSessionData {
+    fun generateQrSession(
+        operationHint: String = "ga",
+        supportBleL2cap: Boolean = true
+    ): ClientQrSessionData {
         val (pubKey, privKey) = CryptoHelper.generateEcKeyPair()
         val compressedPubKey = CryptoHelper.compressECKey(pubKey)
         val uncompressedPubKey = CryptoHelper.uncompressECKey(pubKey)
@@ -40,6 +44,8 @@ object HybridQrGenerator {
         val qrSecret = ByteArray(16).also { secureRandom.nextBytes(it) }
         val epochSeconds = System.currentTimeMillis() / 1000L
         val normalizedHint = if (operationHint == "mc") "mc" else "ga"
+        // Advertise BLE L2CAP (1) alongside WebSockets (0) only when the controller supports extended advertising per PXP §5.3.1 & §5.4.1
+        val supportedTransports = if (supportBleL2cap) listOf(0L, 1L) else listOf(0L)
 
         // Construct canonical CBOR map for QR code payload per CTAP 2.3 §11.5.1.1 and PXP §5.3.1
         val qrCborMap = mapOf<Long, Any>(
@@ -49,8 +55,7 @@ object HybridQrGenerator {
             3L to epochSeconds,
             4L to false, // State-assisted linking disabled; enforce stateless QR flow
             5L to normalizedHint,
-            // Advertise support for both WebSockets (0) and BLE L2CAP (1) data transfer channels per PXP §5.3.1 Key 6
-            6L to listOf(0L, 1L)
+            6L to supportedTransports
         )
 
         val cborBytes = CtapCodec.SimpleCbor.write(qrCborMap)
