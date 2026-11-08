@@ -14,10 +14,10 @@ object SharedHttpClient {
     // Initialize OkHttpClient lazily so referencing this object in Application.onCreate()
     // does not synchronously load the system X509TrustManager and SSLContext on the main thread.
     // OkHttp 5.x enables RFC 8305 Happy Eyeballs (fastFallback) by default so unreachable IPv6
-    // routes fall back to IPv4 within 250ms instead of blocking for the full 5s connectTimeout.
+    // routes fall back to IPv4 within 250ms instead of blocking for the full 4s connectTimeout.
     val sharedClient: OkHttpClient by lazy {
         OkHttpClient.Builder()
-            .connectTimeout(5, TimeUnit.SECONDS)
+            .connectTimeout(4, TimeUnit.SECONDS)
             .readTimeout(0, TimeUnit.SECONDS)
             .writeTimeout(30, TimeUnit.SECONDS)
             .pingInterval(5, TimeUnit.SECONDS)
