@@ -144,8 +144,6 @@ class ClientTransportManager(
             identityPrivateKey = qrSession.identityPrivateKey,
             uncompressedIdentityPubKey = qrSession.uncompressedIdentityPublicKey
         )
-        // Pre-compute the 81-byte ClientHello before the transport channel finishes setup
-        val clientHello = noiseSession.startHandshakeAndBuildClientHello(psk)
         val awaitingPostHandshake = AtomicBoolean(true)
         val completed = AtomicBoolean(false)
         val commandByte: Byte = when (ctapRequest) {
@@ -163,7 +161,9 @@ class ClientTransportManager(
 
         fun onChannelConnected(sourceChannel: PxpDataChannel) {
             if (activeChannel === sourceChannel) {
-                // Initiator speaks first in KNpsk0 to prove possession of the decrypted BLE advert
+                // Build a fresh KNpsk0 ClientHello per connection attempt so fallback channels never reuse mutated handshake state
+                awaitingPostHandshake.set(true)
+                val clientHello = noiseSession.startHandshakeAndBuildClientHello(psk)
                 sourceChannel.sendFrame(clientHello)
             }
         }
@@ -235,6 +235,7 @@ class ClientTransportManager(
             val domain = DomainDerivation.resolveDomainOrNull(advert.encodedTunnelServerDomain)
             if (domain == null) {
                 if (clearActiveSession(expectedPriorChannel)) {
+                    expectedPriorChannel?.cancel()
                     onError("Authenticator requested unsupported tunnel domain ID: ${advert.encodedTunnelServerDomain}")
                 }
                 return
@@ -252,6 +253,7 @@ class ClientTransportManager(
             // Bind the WebSocket channel only if the session was not cancelled while L2CAP was attempting to connect
             val shouldConnect = synchronized(this@ClientTransportManager) {
                 if (expectedPriorChannel == null || activeChannel === expectedPriorChannel) {
+                    expectedPriorChannel?.cancel()
                     activeChannel = ws
                     true
                 } else {
@@ -268,6 +270,7 @@ class ClientTransportManager(
         val psm = advert.serverPsm
         val device = advert.bluetoothDevice
         if (psm != null && device != null) {
+            val hasValidTunnelRoute = advert.routingId.any { it != 0.toByte() }
             Log.d("ClientTransport", "Authenticator advertised L2CAP PSM $psm; connecting over BLE CoC")
             lateinit var l2cap: ClientL2capChannel
             l2cap = ClientL2capChannel(
@@ -276,7 +279,6 @@ class ClientTransportManager(
                 onConnected = { onChannelConnected(l2cap) },
                 onMessageReceived = { frame -> onChannelMessage(l2cap, frame) },
                 onConnectFailed = { err ->
-                    val hasValidTunnelRoute = advert.routingId.any { it != 0.toByte() }
                     if (hasValidTunnelRoute) {
                         Log.w("ClientTransport", "L2CAP connection failed; falling back to WebSocket tunnel")
                         startWebsocketTransport(expectedPriorChannel = l2cap)
@@ -284,7 +286,14 @@ class ClientTransportManager(
                         onError("BLE L2CAP connection failed: ${err.message ?: "I/O error"}")
                     }
                 },
-                onDisconnected = { onChannelDisconnected(l2cap) }
+                onDisconnected = {
+                    if (!noiseSession.isHandshakeComplete && hasValidTunnelRoute) {
+                        Log.w("ClientTransport", "L2CAP disconnected pre-handshake; falling back to WebSocket tunnel")
+                        startWebsocketTransport(expectedPriorChannel = l2cap)
+                    } else {
+                        onChannelDisconnected(l2cap)
+                    }
+                }
             )
             synchronized(this) {
                 activeChannel = l2cap

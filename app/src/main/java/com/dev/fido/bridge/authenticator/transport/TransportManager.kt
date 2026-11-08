@@ -358,18 +358,15 @@ class TransportManager(
                 }
             }
 
-            // Priority 1: Direct BLE L2CAP CoC when supported by both QR (Key 6 contains 1) and local controller per PXP §6.1.2
+            // Priority 1: Exclusively use direct BLE L2CAP CoC when supported by both QR (Key 6 contains 1)
+            // and local controller per PXP §6.1.2 to avoid WebSocket relay latency.
             if (1 in supportedTransports && bleAdvertiser.isExtendedAdvertisingSupported()) {
                 lateinit var sessionL2cap: AuthenticatorL2capChannel
                 sessionL2cap = AuthenticatorL2capChannel(
                     adapterProvider = adapterProvider,
                     onMessageReceived = { frame -> handleInboundFrame(sessionL2cap, frame) },
                     onDisconnected = {
-                        // Fall back to WebSocket if L2CAP drops before completing the Noise handshake
-                        if (!sessionNoise.isHandshakeComplete && 0 in supportedTransports) {
-                            Log.w("TransportManager", "L2CAP disconnected pre-handshake; falling back to WebSocket")
-                            startWebsocketFallback(priorChannel = sessionL2cap)
-                        } else if (clearActiveSession(sessionL2cap)) {
+                        if (clearActiveSession(sessionL2cap)) {
                             bleAdvertiser.stopAdvertising()
                             onSessionTerminated?.invoke()
                         }
