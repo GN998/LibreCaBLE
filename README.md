@@ -11,19 +11,20 @@ LibreCaBLE is a lightweight, GMS-free FIDO2 hybrid transport (caBLE v2 / CTAP 2.
 
 ## Requirements
 
-1. **System**: Android 14+ with Bluetooth enabled and `BLUETOOTH_ADVERTISE`, `BLUETOOTH_SCAN`, and `BLUETOOTH_CONNECT` granted.
+1. **Android 14+ (API 34+)** with Bluetooth enabled.
 2. **CMHD (Authenticator) Mode**:
-   * App signing certificate SHA-256 fingerprint must be allowlisted in your local credential provider (e.g., Bitwarden) to permit `CREDENTIAL_MANAGER_SET_ORIGIN` (untrusted calls return `CTAP2_ERR_OPERATION_DENIED` / `0x27`).
+   * App signing certificate SHA-256 fingerprint must be allowlisted in or directly trusted by your local credential provider (e.g., Bitwarden) to permit `CREDENTIAL_MANAGER_SET_ORIGIN`.
    * An external camera or QR scanner app that dispatches `VIEW` intents for `FIDO:/` URIs.
-3. **Client Platform Mode**: Enable **LibreCaBLE** in Android *Settings > Passwords & passkeys* (or via the in-app menu).
+   * *(Optional)* Custom tunnel domain ID can be configured via **⋮ > Extended Domain Settings** .
+3. **Client Platform Mode**: Enable **LibreCaBLE** in Android *Settings > Passwords & passkeys* (or via **⋮ > Enable Client Provider**).
 
 ## License & Acknowledgments
 
 Licensed under the [GNU General Public License v3.0 (GPLv3)](LICENSE).
 
 * **[microG GmsCore](https://github.com/microg/GmsCore/)**: Protocol logic inspired by microG GmsCore ([Apache 2.0](https://github.com/microg/GmsCore/blob/master/LICENSE)).
-* **[FIDO Alliance](https://fidoalliance.org/)**: CTAP 2.3 and WebAuthn specifications.
+* **[FIDO Alliance](https://fidoalliance.org/)**: CTAP and WebAuthn specifications.
 * **[Bitwarden](https://github.com/bitwarden/android)**: Open-source Android `CredentialManager` and local trust integration.
 * **[Cloudflare](https://www.cloudflare.com/)**: WebSocket tunnel relay infrastructure. 
 
-* **GitHub** & **linux.do**
+* GitHub & LinuxDo
