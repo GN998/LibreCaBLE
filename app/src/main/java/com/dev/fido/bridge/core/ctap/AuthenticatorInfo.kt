@@ -1,9 +1,15 @@
 package com.dev.fido.bridge.core.ctap
 
-import com.dev.fido.bridge.core.ctap.codec.CtapCodec
+// import com.dev.fido.bridge.core.ctap.codec.CtapCodec
 import com.dev.fido.bridge.core.ctap.model.Ctap2Response
 
 object AuthenticatorInfo {
+    // Restrict advertised GetInfo algorithms (Key 10) to standard COSE identifiers recognized by
+    // Google Play Services (GMS) COSEAlgorithmIdentifier enum so peers do not crash on newer values like -9.
+    private val ADVERTISED_COSE_ALGORITHMS = listOf(
+        -7L, -8L, -35L, -36L, -37L, -38L, -39L, -257L
+    )
+
     fun getInfo(): Ctap2Response.GetInfoResponse {
         return Ctap2Response.GetInfoResponse(
             // Advertise FIDO_2_0 and FIDO_2_1 with built-in UV (uv = true, alwaysUv = true) and no pinUvAuthProtocols
@@ -21,7 +27,7 @@ object AuthenticatorInfo {
             ),
             maxMsgSize = 2048,
             pinUvAuthProtocols = emptyList(),
-            algorithms = CtapCodec.SUPPORTED_COSE_ALGORITHMS.map { alg ->
+            algorithms = ADVERTISED_COSE_ALGORITHMS.map { alg ->
                 mapOf("type" to "public-key", "alg" to alg)
             }
         )
