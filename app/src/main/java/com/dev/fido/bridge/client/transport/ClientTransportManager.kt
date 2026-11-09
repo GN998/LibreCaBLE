@@ -270,7 +270,9 @@ class ClientTransportManager(
         val psm = advert.serverPsm
         val device = advert.bluetoothDevice
         if (psm != null && device != null) {
-            val hasValidTunnelRoute = advert.routingId.any { it != 0.toByte() }
+            // Allow WebSocket fallback only when the advert encodes both a resolvable tunnel domain and a non-zero routing ID
+            val hasValidTunnelRoute = DomainDerivation.resolveDomainOrNull(advert.encodedTunnelServerDomain) != null &&
+                advert.routingId.any { it != 0.toByte() }
             Log.d("ClientTransport", "Authenticator advertised L2CAP PSM $psm; connecting over BLE CoC")
             lateinit var l2cap: ClientL2capChannel
             l2cap = ClientL2capChannel(

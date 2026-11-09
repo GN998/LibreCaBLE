@@ -66,8 +66,8 @@ class HybridBleAdvertiser(
                 .setTxPowerLevel(AdvertisingSetParameters.TX_POWER_HIGH)
                 .build()
 
+            // Omit redundant 16-bit Service UUID AD structure on extended connectable adverts to minimize AUX_ADV_IND airtime
             val data = AdvertiseData.Builder()
-                .addServiceUuid(serviceUuid)
                 .addServiceData(serviceUuid, extendedServiceData)
                 .setIncludeDeviceName(false)
                 .setIncludeTxPowerLevel(false)

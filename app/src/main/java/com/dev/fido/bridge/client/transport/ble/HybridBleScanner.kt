@@ -35,9 +35,15 @@ class HybridBleScanner(private val scannerProvider: () -> BluetoothLeScanner?) {
             return false
         }
 
-        val filter = ScanFilter.Builder()
-            .setServiceUuid(fidoServiceUuid)
-            .build()
+        // Match both standard PXP Service Data (AD type 0x16) and legacy Service UUID (AD type 0x02/0x03) advertisements
+        val filters = listOf(
+            ScanFilter.Builder()
+                .setServiceData(fidoServiceUuid, ByteArray(0), ByteArray(0))
+                .build(),
+            ScanFilter.Builder()
+                .setServiceUuid(fidoServiceUuid)
+                .build()
+        )
 
         // Enable extended advertising reception (legacy = false) and all supported PHYs so BLE 5.0
         // advertisement suffixes containing the L2CAP server PSM (>20 bytes) are not truncated by the controller.
@@ -92,7 +98,7 @@ class HybridBleScanner(private val scannerProvider: () -> BluetoothLeScanner?) {
         }
 
         return try {
-            scanner.startScan(listOf(filter), settings, callback)
+            scanner.startScan(filters, settings, callback)
             activeCallback = callback
             true
         } catch (e: SecurityException) {
