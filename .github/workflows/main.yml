@@ -47,7 +47,7 @@ jobs:
           # Explicitly provision Gradle 9.4.1 into system PATH and disable remote cache
           # to prevent GitHub Actions cache egress quota RestErrors.
           gradle-version: '9.4.1'
-          cache-disabled: true
+          cache-disabled: false
 
       # ==========================================
       # 2. Build Process (Release)
