@@ -49,42 +49,32 @@ class ClientL2capChannel(
     @SuppressLint("MissingPermission")
     fun connect() {
         channelScope.launch {
-            lateinit var l2capSocket: BluetoothSocket
-            // Retry once on transient L2CAP CoC connection failure (e.g., HCI 0x3E GATT_CONN_FAILED_ESTABLISHMENT)
-            // when the controller transitions from extended scanning to initiating state.
-            for (attempt in 1..2) {
-                val candidate = try {
-                    device.createInsecureL2capChannel(psm).also { socket = it }
-                } catch (t: Throwable) {
-                    if (!isClientClosed) {
-                        Log.e("ClientL2capChannel", "Failed to create L2CAP socket on PSM $psm", t)
-                        onConnectFailed(t)
-                    }
-                    return@launch
+            // Attempt a single L2CAP CoC connection so failure falls back to the WebSocket tunnel without retry delay
+            val l2capSocket = try {
+                device.createInsecureL2capChannel(psm).also { socket = it }
+            } catch (t: Throwable) {
+                if (!isClientClosed) {
+                    Log.e("ClientL2capChannel", "Failed to create L2CAP socket on PSM $psm", t)
+                    onConnectFailed(t)
                 }
+                return@launch
+            }
 
-                if (isClientClosed) {
-                    runCatching { candidate.close() }
-                    return@launch
-                }
+            if (isClientClosed) {
+                runCatching { l2capSocket.close() }
+                return@launch
+            }
 
-                try {
-                    candidate.connect()
-                    l2capSocket = candidate
-                    Log.d("ClientL2capChannel", "L2CAP CoC connected on PSM $psm")
-                    break
-                } catch (t: Throwable) {
-                    runCatching { candidate.close() }
-                    if (isClientClosed) return@launch
-                    if (attempt < 2) {
-                        Log.w("ClientL2capChannel", "L2CAP connect failed on PSM $psm; retrying once...", t)
-                        delay(150)
-                    } else {
-                        Log.w("ClientL2capChannel", "L2CAP connect failed on PSM $psm", t)
-                        onConnectFailed(t)
-                        return@launch
-                    }
+            try {
+                l2capSocket.connect()
+                Log.d("ClientL2capChannel", "L2CAP CoC connected on PSM $psm")
+            } catch (t: Throwable) {
+                runCatching { l2capSocket.close() }
+                if (!isClientClosed) {
+                    Log.w("ClientL2capChannel", "L2CAP connect failed on PSM $psm", t)
+                    onConnectFailed(t)
                 }
+                return@launch
             }
 
             val input = DataInputStream(l2capSocket.inputStream)
@@ -99,6 +89,8 @@ class ClientL2capChannel(
                         output.write(payload)
                         output.flush()
                     }
+                    // Allow Bluedroid L2CAP TX queue to drain the final frame (0x00 typeShutdown) over the air
+                    delay(50)
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: IOException) {
