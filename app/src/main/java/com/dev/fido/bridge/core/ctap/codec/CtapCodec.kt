@@ -157,6 +157,15 @@ object CtapCodec {
             throw CtapCodecException(CtapStatus.ERR_INVALID_PARAMETER, "Enterprise attestation is not supported")
         }
 
+        // Type-check optional attestationFormatsPreference (key 11) per CTAP 2.3 §6.1 & §8
+        map[11L]?.let { rawFormats ->
+            val formatList = rawFormats as? List<*>
+                ?: throw CtapCodecException(CtapStatus.ERR_CBOR_UNEXPECTED_TYPE, "attestationFormatsPreference must be a CBOR array")
+            if (formatList.any { it !is String }) {
+                throw CtapCodecException(CtapStatus.ERR_CBOR_UNEXPECTED_TYPE, "attestationFormatsPreference elements must be text strings")
+            }
+        }
+
         return Ctap2Request.MakeCredential(
             clientDataHash = clientDataHash,
             rpId = rpId,
