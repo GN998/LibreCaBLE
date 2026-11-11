@@ -18,6 +18,10 @@ LibreCaBLE is a lightweight, GMS-free FIDO2 hybrid transport (caBLE v2 / CTAP 2.
    * *(Optional)* Custom tunnel domain ID can be configured via **⋮ > Extended Domain Settings** .
 3. **Client Platform Mode**: Enable **LibreCaBLE** in Android *Settings > Passwords & passkeys* (or via **⋮ > Enable Client Provider**).
 
+## Roadmap
+
+* WebAuthn prf Extension (hmac-secret): Planned support for credential-scoped PRF evaluation during cross-device ceremonies.
+
 ## License & Acknowledgments
 
 Licensed under the [GNU General Public License v3.0 (GPLv3)](LICENSE).
