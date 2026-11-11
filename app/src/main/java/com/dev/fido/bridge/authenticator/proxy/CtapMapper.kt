@@ -8,6 +8,9 @@ import com.dev.fido.bridge.core.ctap.model.CredentialDescriptor
 import com.dev.fido.bridge.core.ctap.model.Ctap2Request
 import com.dev.fido.bridge.core.ctap.model.Ctap2Response
 import com.dev.fido.bridge.core.ctap.model.CtapStatus
+import com.dev.fido.bridge.core.ctap.model.PrfExtensionInput
+import com.dev.fido.bridge.core.ctap.model.PrfExtensionOutput
+import com.dev.fido.bridge.core.ctap.model.PrfValues
 import com.dev.fido.bridge.core.security.CryptoUtils
 import org.json.JSONArray
 import org.json.JSONObject
@@ -24,6 +27,9 @@ object CtapMapper {
             // Omit empty allowCredentials so Android CredentialManager providers do not reject discoverable credential lookups
             req.allowList?.takeIf { it.isNotEmpty() }?.let { list ->
                 put("allowCredentials", list.toJsonArray())
+            }
+            req.prf?.let { prf ->
+                put("extensions", JSONObject().put("prf", prf.toJsonObject()))
             }
         }.toString()
     }
@@ -60,7 +66,55 @@ object CtapMapper {
             // attestation statements (fmt, attStmt) and AAGUID are preserved over CTAP2; the client
             // platform remains responsible for applying the RP's attestation conveyance preference.
             put("attestation", "direct")
+            req.prf?.let { prf ->
+                put("extensions", JSONObject().put("prf", prf.toJsonObject()))
+            }
         }.toString()
+    }
+
+    /**
+     * Serialize pre-hashed CTAP2 PRF inputs into WebAuthn JSON with "prfAlreadyHashed": true
+     * so downstream Android credential providers do not double-hash the 32-byte salts.
+     */
+    private fun PrfExtensionInput.toJsonObject(): JSONObject = JSONObject().apply {
+        eval?.let { put("eval", it.toJsonObject()) }
+        evalByCredential?.takeIf { it.isNotEmpty() }?.let { map ->
+            put("evalByCredential", JSONObject().apply {
+                map.forEach { (credIdB64, vals) -> put(credIdB64, vals.toJsonObject()) }
+            })
+        }
+        if (eval != null || !evalByCredential.isNullOrEmpty()) {
+            put("prfAlreadyHashed", true)
+        }
+    }
+
+    private fun PrfValues.toJsonObject(): JSONObject = JSONObject().apply {
+        put("first", CryptoUtils.encodeBase64UrlNoPadding(first))
+        second?.let { put("second", CryptoUtils.encodeBase64UrlNoPadding(it)) }
+    }
+
+    private fun parsePrfOutputFromClientExtensionResults(
+        rootObj: JSONObject,
+        isRegistration: Boolean = false
+    ): PrfExtensionOutput? {
+        val prfObj = rootObj.optJSONObject("clientExtensionResults")?.optJSONObject("prf") ?: return null
+        val results = prfObj.optJSONObject("results")?.let { resObj ->
+            val firstStr = resObj.optString("first", "")
+            if (firstStr.isEmpty()) return@let null
+            val firstBytes = CryptoUtils.decodeBase64Url(firstStr).takeIf { it.size == 32 } ?: return@let null
+            val secondBytes = resObj.optString("second", "").takeIf { it.isNotEmpty() }
+                ?.let { CryptoUtils.decodeBase64Url(it) }
+                ?.takeIf { it.size == 32 }
+            PrfValues(first = firstBytes, second = secondBytes)
+        }
+        // Default enabled to true during registration if the provider returned PRF results without an explicit enabled boolean
+        val enabled = when {
+            prfObj.has("enabled") -> prfObj.optBoolean("enabled")
+            isRegistration && results != null -> true
+            else -> null
+        }
+        if (enabled == null && results == null) return null
+        return PrfExtensionOutput(enabled = enabled, results = results)
     }
 
     /**
@@ -106,12 +160,14 @@ object CtapMapper {
             signature = CryptoUtils.decodeBase64Url(responseObj.getString("signature")),
             userHandle = userHandle,
             // Set userSelected to true when the user selected a discoverable credential on the authenticator UI per CTAP 2.3 §6.2.2
-            userSelected = allowList.isNullOrEmpty()
+            userSelected = allowList.isNullOrEmpty(),
+            prf = parsePrfOutputFromClientExtensionResults(rootObj)
         )
     }
 
     fun parseMakeCredentialResponseJson(jsonResponseStr: String): Ctap2Response.MakeCredentialResponse {
-        val responseObj = JSONObject(jsonResponseStr).getJSONObject("response")
+        val rootObj = JSONObject(jsonResponseStr)
+        val responseObj = rootObj.getJSONObject("response")
         val attestationObjectBytes = CryptoUtils.decodeBase64Url(responseObj.getString("attestationObject"))
 
         // Decode provider-generated WebAuthn attestationObject using non-strict RFC 8949 rules before canonical CTAP2 re-encoding
@@ -121,7 +177,8 @@ object CtapMapper {
         return Ctap2Response.MakeCredentialResponse(
             fmt = map.requireField("fmt", "attestationObject.fmt"),
             authData = map.requireField("authData", "attestationObject.authData"),
-            attStmt = map.requireField("attStmt", "attestationObject.attStmt")
+            attStmt = map.requireField("attStmt", "attestationObject.attStmt"),
+            prf = parsePrfOutputFromClientExtensionResults(rootObj, isRegistration = true)
         )
     }
 }

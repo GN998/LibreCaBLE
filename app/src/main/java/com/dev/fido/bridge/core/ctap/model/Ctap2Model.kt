@@ -1,5 +1,29 @@
 package com.dev.fido.bridge.core.ctap.model
 
+/**
+ * Represent a pair of 32-byte pre-hashed PRF evaluation salts or outputs per WebAuthn Level 3 §10.1.4.
+ */
+data class PrfValues(
+    val first: ByteArray,
+    val second: ByteArray? = null
+)
+
+/**
+ * Represent CTAP2/WebAuthn PRF extension request inputs (eval and optional evalByCredential map keyed by Base64URL credential ID).
+ */
+data class PrfExtensionInput(
+    val eval: PrfValues? = null,
+    val evalByCredential: Map<String, PrfValues>? = null
+)
+
+/**
+ * Represent CTAP2/WebAuthn PRF extension response outputs carried in unsignedExtensionOutputs["prf"].
+ */
+data class PrfExtensionOutput(
+    val enabled: Boolean? = null,
+    val results: PrfValues? = null
+)
+
 sealed class Ctap2Request {
     // Use singleton data objects to avoid allocating dummy fields for stateless GetInfo and Selection requests
     data object GetInfo : Ctap2Request()
@@ -11,7 +35,8 @@ sealed class Ctap2Request {
         val allowList: List<CredentialDescriptor>? = null,
         val userVerification: String,
         // Default "up" to true per CTAP 2.3 §6.2.2 Step 4.5; false indicates a silent pre-flight probe
-        val userPresence: Boolean = true
+        val userPresence: Boolean = true,
+        val prf: PrfExtensionInput? = null
     ) : Ctap2Request()
 
     data class MakeCredential(
@@ -23,7 +48,8 @@ sealed class Ctap2Request {
         val userDisplayName: String,
         val pubKeyCredParams: List<Map<String, Any>>,
         val excludeList: List<CredentialDescriptor>? = null,
-        val options: Map<String, Boolean>? = null
+        val options: Map<String, Boolean>? = null,
+        val prf: PrfExtensionInput? = null
     ) : Ctap2Request()
 }
 
@@ -53,13 +79,15 @@ sealed class Ctap2Response {
         val signature: ByteArray,
         val userHandle: ByteArray? = null,
         // Indicate whether a credential was explicitly selected via the authenticator UI per CTAP 2.3 §6.2.2
-        val userSelected: Boolean = false
+        val userSelected: Boolean = false,
+        val prf: PrfExtensionOutput? = null
     ) : Ctap2Response()
 
     data class MakeCredentialResponse(
         val fmt: String,
         val authData: ByteArray,
-        val attStmt: Map<*, *>
+        val attStmt: Map<*, *>,
+        val prf: PrfExtensionOutput? = null
     ) : Ctap2Response()
 
     data class ErrorResponse(val errorCode: Byte) : Ctap2Response()
