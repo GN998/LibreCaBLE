@@ -7,6 +7,8 @@ import com.dev.fido.bridge.core.ctap.model.CredentialDescriptor
 import com.dev.fido.bridge.core.ctap.model.Ctap2Request
 import com.dev.fido.bridge.core.ctap.model.Ctap2Response
 import com.dev.fido.bridge.core.ctap.model.CtapStatus
+import com.dev.fido.bridge.core.ctap.model.PrfExtensionInput
+import com.dev.fido.bridge.core.ctap.model.PrfValues
 
 /**
  * Client-side CTAP2 encoder (for outbound commands) and decoder (for inbound authenticator responses)
@@ -16,11 +18,10 @@ object ClientCtapCodec {
 
     /**
      * Inspect the authenticator's raw GetInfo response bytes from the post-handshake message
-     * and return whether built-in user verification (options["uv"] == true) is supported per CTAP 2.3 §6.4.
+     * and return whether built-in user verification (options["uv"]) is supported per CTAP 2.3 §6.4.
      */
-    fun extractBuiltInUvSupport(getInfoBytes: ByteArray): Boolean {
+    fun supportsBuiltInUv(getInfoBytes: ByteArray): Boolean {
         return runCatching {
-            // Post-handshake Key 1 may be a raw CBOR map or prefixed with 0x00 status byte depending on peer implementation
             val cborSlice = if (getInfoBytes.isNotEmpty() && getInfoBytes[0] == CtapStatus.SUCCESS) {
                 getInfoBytes.copyOfRange(1, getInfoBytes.size)
             } else {
@@ -35,7 +36,7 @@ object ClientCtapCodec {
     /**
      * Serialize a [Ctap2Request] into a wire command byte + canonical CBOR map.
      * Strip the "uv" option if the peer authenticator does not advertise built-in UV support
-     * per CTAP 2.3 §6.1.1 / §6.2.2 to prevent CTAP2_ERR_INVALID_OPTION (0x2C) on USB security keys.
+     * per CTAP 2.3 §6.1.1 / §6.2.2 to prevent protocol errors on restricted authenticators.
      */
     fun encodeRequest(
         request: Ctap2Request,
@@ -63,6 +64,11 @@ object ClientCtapCodec {
                     request.excludeList?.takeIf { it.isNotEmpty() }?.let { list ->
                         put(5L, list.map { it.toCborMap() })
                     }
+                    // Preserve empty {"prf": {}} maps during MakeCredential so RPs that enable PRF at registration
+                    // without immediate eval salts still trigger hmac-secret creation per WebAuthn Level 3 §10.1.4.
+                    if (request.prf != null) {
+                        put(6L, mapOf("prf" to request.prf.toCborMap()))
+                    }
                     filteredOptions?.takeIf { it.isNotEmpty() }?.let { opts ->
                         put(7L, opts)
                     }
@@ -75,6 +81,10 @@ object ClientCtapCodec {
                     put(2L, request.clientDataHash)
                     request.allowList?.takeIf { it.isNotEmpty() }?.let { list ->
                         put(3L, list.map { it.toCborMap() })
+                    }
+                    // Encode optional PRF extension dictionary in GetAssertion extensions (key 4) when non-empty
+                    request.prf?.toCborMap()?.takeIf { it.isNotEmpty() }?.let { prfCbor ->
+                        put(4L, mapOf("prf" to prfCbor))
                     }
                     val optionsMap = buildMap<String, Boolean> {
                         if (!request.userPresence) put("up", false)
@@ -90,6 +100,18 @@ object ClientCtapCodec {
                 byteArrayOf(0x02) + CtapCodec.SimpleCbor.write(map)
             }
         }
+    }
+
+    private fun PrfExtensionInput.toCborMap(): Map<String, Any> = buildMap {
+        eval?.let { put("eval", it.toCborMap()) }
+        evalByCredential?.takeIf { it.isNotEmpty() }?.let { byCred ->
+            put("evalByCredential", byCred.mapValues { (_, v) -> v.toCborMap() })
+        }
+    }
+
+    private fun PrfValues.toCborMap(): Map<String, Any> = buildMap {
+        put("first", first)
+        second?.let { put("second", it) }
     }
 
     private fun CredentialDescriptor.toCborMap(): Map<String, Any> = buildMap {
@@ -125,20 +147,23 @@ object ClientCtapCodec {
 
         return when (commandByte) {
             0x01.toByte() -> {
-                val fmt = map.requireField<String>(1L, "MakeCredential.fmt")
-                val authData = map.requireField<ByteArray>(2L, "MakeCredential.authData")
+                val authData: ByteArray = map.requireField(2L, "MakeCredential.authData")
                 // Enforce minimum 55-byte attested authData with AT flag (0x40) set per WebAuthn §6.1 & §6.5.1
                 if (authData.size < 55 || (authData[32].toInt() and 0x40) == 0) {
                     throw CtapCodecException(CtapStatus.ERR_INVALID_CBOR, "Invalid MakeCredential authData")
                 }
-                val attStmt = map.requireField<Map<*, *>>(3L, "MakeCredential.attStmt")
-                Ctap2Response.MakeCredentialResponse(fmt = fmt, authData = authData, attStmt = attStmt)
+                Ctap2Response.MakeCredentialResponse(
+                    fmt = map.requireField(1L, "MakeCredential.fmt"),
+                    authData = authData,
+                    attStmt = map.requireField(3L, "MakeCredential.attStmt"),
+                    prf = CtapCodec.decodePrfExtensionOutput(map[6L])
+                )
             }
             0x02.toByte() -> {
                 val credMap = map[1L] as? Map<*, *>
                 val credentialId = (credMap?.get("id") as? ByteArray) ?: ByteArray(0)
-                val authData = map.requireField<ByteArray>(2L, "GetAssertion.authData")
-                val signature = map.requireField<ByteArray>(3L, "GetAssertion.signature")
+                val authData: ByteArray = map.requireField(2L, "GetAssertion.authData")
+                val signature: ByteArray = map.requireField(3L, "GetAssertion.signature")
                 // Enforce minimum 37-byte authData and non-empty signature per WebAuthn §6.1 & CTAP 2.3 §6.2
                 if (authData.size < 37 || signature.isEmpty()) {
                     throw CtapCodecException(CtapStatus.ERR_INVALID_CBOR, "Invalid GetAssertion authData or signature")
@@ -146,12 +171,15 @@ object ClientCtapCodec {
                 val userMap = map[4L] as? Map<*, *>
                 val userHandle = userMap?.get("id") as? ByteArray
                 val userSelected = map[6L] == true
+                // Extract unsignedExtensionOutputs from key 8 per CTAP 2.3 §6.2
+                val prfOut = CtapCodec.decodePrfExtensionOutput(map[8L])
                 Ctap2Response.GetAssertionResponse(
                     credentialId = credentialId,
                     authenticatorData = authData,
                     signature = signature,
                     userHandle = userHandle,
-                    userSelected = userSelected
+                    userSelected = userSelected,
+                    prf = prfOut
                 )
             }
             else -> throw CtapCodecException(CtapStatus.ERR_INVALID_COMMAND, "Unsupported response command context: $commandByte")
