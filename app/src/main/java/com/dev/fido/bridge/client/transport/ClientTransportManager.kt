@@ -182,8 +182,8 @@ class ClientTransportManager(
                     val getInfoBytes = postMap[1L] as? ByteArray
                         ?: throw IllegalArgumentException("Post-handshake message missing getInfo (key 1)")
 
-                    // Negotiate built-in UV per CTAP 2.3 §6.1.1 / §6.2.2 based on peer GetInfo capabilities
-                    val supportsBuiltInUv = ClientCtapCodec.extractBuiltInUvSupport(getInfoBytes)
+                    // Negotiate built-in UV support per CTAP 2.3 §6.1.1 / §6.2.2 based on peer GetInfo capabilities
+                    val supportsBuiltInUv = ClientCtapCodec.supportsBuiltInUv(getInfoBytes)
                     val encodedCtapPayload = ClientCtapCodec.encodeRequest(ctapRequest, supportsBuiltInUv)
 
                     // Send framed CTAP command (0x01 = typeCTAP || commandByte || CBOR) before dispatching UI status update

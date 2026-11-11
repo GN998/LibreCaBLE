@@ -4,6 +4,9 @@ import com.dev.fido.bridge.core.ctap.codec.CtapCodec
 import com.dev.fido.bridge.core.ctap.model.CredentialDescriptor
 import com.dev.fido.bridge.core.ctap.model.Ctap2Request
 import com.dev.fido.bridge.core.ctap.model.Ctap2Response
+import com.dev.fido.bridge.core.ctap.model.PrfExtensionInput
+import com.dev.fido.bridge.core.ctap.model.PrfExtensionOutput
+import com.dev.fido.bridge.core.ctap.model.PrfValues
 import com.dev.fido.bridge.core.security.CryptoUtils
 import org.json.JSONArray
 import org.json.JSONObject
@@ -31,6 +34,8 @@ data class PreparedClientCeremony(
 
 object ClientWebAuthnAssembler {
 
+    private val PRF_HASH_PREFIX = "WebAuthn PRF\u0000".toByteArray(Charsets.UTF_8)
+
     /**
      * Convert Android CredentialProvider GetPublicKeyCredentialOption JSON into a CTAP2 GetAssertion request.
      * If the privileged caller (e.g., Edge) supplies [providedClientDataHash], forward it directly per Android CredentialProvider spec.
@@ -56,13 +61,17 @@ object ClientWebAuthnAssembler {
             ?: CryptoUtils.sha256(clientDataBytes)
 
         val allowList = json.optJSONArray("allowCredentials")?.toDescriptorList()
+        val prfInput = json.optJSONObject("extensions")?.optJSONObject("prf")?.let { prfObj ->
+            parseAndHashPrfInput(prfObj, allowList)
+        }
 
         val ctapReq = Ctap2Request.GetAssertion(
             rpId = rpId,
             clientDataHash = effectiveHash,
             allowList = allowList,
             userVerification = uv,
-            userPresence = true
+            userPresence = true,
+            prf = prfInput
         )
         return PreparedClientCeremony(
             ctapRequest = ctapReq,
@@ -113,8 +122,12 @@ object ClientWebAuthnAssembler {
         val rk = requireRk || residentKeyStr == "required" || residentKeyStr == "preferred"
         val uvStr = authSel?.optString("userVerification", "preferred") ?: "preferred"
 
+        val extObj = json.optJSONObject("extensions")
         // Extract WebAuthn §10.1.3 credProps extension input if requested by the Relying Party
-        val credPropsRequested = json.optJSONObject("extensions")?.optBoolean("credProps", false) == true
+        val credPropsRequested = extObj?.optBoolean("credProps", false) == true
+        val prfInput = extObj?.optJSONObject("prf")?.let { prfObj ->
+            parseAndHashPrfInput(prfObj, allowList = null)
+        }
 
         val options = buildMap<String, Boolean> {
             if (rk) put("rk", true)
@@ -139,7 +152,8 @@ object ClientWebAuthnAssembler {
             userDisplayName = userDisplayName,
             pubKeyCredParams = pubKeyCredParams,
             excludeList = excludeList,
-            options = options
+            options = options,
+            prf = prfInput
         )
         return PreparedClientCeremony(
             ctapRequest = ctapReq,
@@ -148,6 +162,52 @@ object ClientWebAuthnAssembler {
             attestationPreference = attestationPref,
             credPropsRequested = credPropsRequested
         )
+    }
+
+    /**
+     * Parse WebAuthn PRF extension JSON and domain-hash raw evaluation points into 32-byte salts
+     * per WebAuthn Level 3 §10.1.4.
+     */
+    private fun parseAndHashPrfInput(
+        prfObj: JSONObject,
+        allowList: List<CredentialDescriptor>?
+    ): PrfExtensionInput {
+        val eval = prfObj.optJSONObject("eval")?.let(::hashPrfValuesJson)
+
+        val evalByCredObj = prfObj.optJSONObject("evalByCredential")
+        val evalByCredential = if (evalByCredObj != null && !allowList.isNullOrEmpty()) {
+            val allowedIdsB64 = allowList.map { CryptoUtils.encodeBase64UrlNoPadding(it.id) }.toSet()
+            buildMap<String, PrfValues> {
+                for (key in evalByCredObj.keys()) {
+                    if (key in allowedIdsB64) {
+                        evalByCredObj.optJSONObject(key)?.let(::hashPrfValuesJson)?.let { put(key, it) }
+                    }
+                }
+            }.takeIf { it.isNotEmpty() }
+        } else {
+            null
+        }
+
+        return PrfExtensionInput(eval = eval, evalByCredential = evalByCredential)
+    }
+
+    private fun hashPrfValuesJson(valObj: JSONObject): PrfValues? {
+        val firstStr = valObj.optString("first", "").takeIf { it.isNotEmpty() } ?: return null
+        val firstBytes = CryptoUtils.sha256(PRF_HASH_PREFIX + CryptoUtils.decodeBase64Url(firstStr))
+        val secondBytes = valObj.optString("second", "").takeIf { it.isNotEmpty() }?.let {
+            CryptoUtils.sha256(PRF_HASH_PREFIX + CryptoUtils.decodeBase64Url(it))
+        }
+        return PrfValues(first = firstBytes, second = secondBytes)
+    }
+
+    private fun PrfExtensionOutput.toClientExtensionJson(): JSONObject = JSONObject().apply {
+        enabled?.let { put("enabled", it) }
+        results?.let { res ->
+            put("results", JSONObject().apply {
+                put("first", CryptoUtils.encodeBase64UrlNoPadding(res.first))
+                res.second?.let { put("second", CryptoUtils.encodeBase64UrlNoPadding(it)) }
+            })
+        }
     }
 
     /**
@@ -163,6 +223,10 @@ object ClientWebAuthnAssembler {
             ?: ByteArray(0)
         val credIdB64 = CryptoUtils.encodeBase64UrlNoPadding(effectiveCredId)
 
+        val clientExtensionResults = JSONObject().apply {
+            response.prf?.let { put("prf", it.toClientExtensionJson()) }
+        }
+
         return JSONObject().apply {
             put("id", credIdB64)
             put("rawId", credIdB64)
@@ -176,21 +240,22 @@ object ClientWebAuthnAssembler {
                     put("userHandle", CryptoUtils.encodeBase64UrlNoPadding(uh))
                 }
             })
-            put("clientExtensionResults", JSONObject())
+            put("clientExtensionResults", clientExtensionResults)
         }.toString()
     }
 
     /**
      * Assemble WebAuthn RegistrationResponseJSON string from a CTAP2 MakeCredentialResponse per WebAuthn §5.1.
      * Strip attestation statement while retaining the 16-byte AAGUID when [attestationPreference] is "none" per WebAuthn Level 3 §5.1.3,
-     * and populate authenticatorData, publicKeyAlgorithm, SPKI publicKey, and optional credProps clientExtensionResults.
+     * and populate authenticatorData, publicKeyAlgorithm, SPKI publicKey, and optional credProps/prf clientExtensionResults.
      */
     fun buildMakeCredentialResponseJson(
         response: Ctap2Response.MakeCredentialResponse,
         clientDataJsonBytes: ByteArray,
         attestationPreference: String = "none",
         credPropsRequested: Boolean = false,
-        isDiscoverableKey: Boolean = false
+        isDiscoverableKey: Boolean = false,
+        prfRequested: Boolean = false
     ): String {
         val stripAttestation = attestationPreference == "none"
         // Retain the 16-byte AAGUID in authData when attestation conveyance is "none" per WebAuthn Level 3 §5.1.3.
@@ -210,6 +275,12 @@ object ClientWebAuthnAssembler {
             // Populate WebAuthn §10.1.3 CredentialPropertiesOutput ("rk" boolean) when requested by the Relying Party
             if (credPropsRequested) {
                 put("credProps", JSONObject().put("rk", isDiscoverableKey))
+            }
+            if (response.prf != null) {
+                put("prf", response.prf.toClientExtensionJson())
+            } else if (prfRequested) {
+                // Report enabled=false when the Relying Party requested PRF at registration but the authenticator does not support it per WebAuthn Level 3 §10.1.4
+                put("prf", JSONObject().put("enabled", false))
             }
         }
 
