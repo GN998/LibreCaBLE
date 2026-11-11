@@ -2,12 +2,12 @@ name: Android CI Build
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "dev_prf" ]
     paths-ignore:
       - '**.md'
       - 'docs/**'
   pull_request:
-    branches: [ "main" ]
+    branches: [ "dev_prf" ]
   workflow_dispatch:
 
 # Cancel in-progress runs on the same branch/PR when a new commit is pushed
