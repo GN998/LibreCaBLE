@@ -172,7 +172,7 @@ object CtapMapper {
 
     fun parseMakeCredentialResponseJson(
         jsonResponseStr: String,
-        prfRequested: Boolean = false
+        prfInput: PrfExtensionInput? = null
     ): Ctap2Response.MakeCredentialResponse {
         val rootObj = JSONObject(jsonResponseStr)
         val responseObj = rootObj.getJSONObject("response")
@@ -182,10 +182,14 @@ object CtapMapper {
         val map = CtapCodec.SimpleCbor.read(attestationObjectBytes, strict = false) as? Map<*, *>
             ?: throw CtapCodecException(CtapStatus.ERR_INVALID_CBOR, "attestationObject must be a CBOR map")
 
-        // Report enabled=true in unsignedExtensionOutputs when the client sent an empty MakeCredential
-        // "prf" dictionary that was omitted from the provider request to keep hardware authData clean.
+        // Report enabled=false when evaluation salts were forwarded to the provider but it returned no PRF output;
+        // report enabled=true only when an empty MakeCredential "prf" dictionary was withheld to keep hardware authData clean.
         val prfOutput = parsePrfOutputFromClientExtensionResults(rootObj, isRegistration = true)
-            ?: if (prfRequested) PrfExtensionOutput(enabled = true) else null
+            ?: when {
+                prfInput == null -> null
+                prfInput.hasEvaluationInputs() -> PrfExtensionOutput(enabled = false)
+                else -> PrfExtensionOutput(enabled = true)
+            }
 
         return Ctap2Response.MakeCredentialResponse(
             fmt = map.requireField("fmt", "attestationObject.fmt"),
