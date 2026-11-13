@@ -344,13 +344,15 @@ class ClientQrPromptActivity : AppCompatActivity() {
                 finish()
             }
             is Ctap2Response.MakeCredentialResponse -> {
-                val isDiscoverableKey = (prepared.ctapRequest as? Ctap2Request.MakeCredential)?.options?.get("rk") == true
+                val makeCredReq = prepared.ctapRequest as? Ctap2Request.MakeCredential
+                val isDiscoverableKey = makeCredReq?.options?.get("rk") == true
                 val responseJson = ClientWebAuthnAssembler.buildMakeCredentialResponseJson(
                     response = response,
                     clientDataJsonBytes = prepared.clientDataJsonBytes,
                     attestationPreference = prepared.attestationPreference,
                     credPropsRequested = prepared.credPropsRequested,
-                    isDiscoverableKey = isDiscoverableKey
+                    isDiscoverableKey = isDiscoverableKey,
+                    prfRequested = makeCredReq?.prf != null
                 )
                 val resultIntent = Intent()
                 PendingIntentHandler.setCreateCredentialResponse(

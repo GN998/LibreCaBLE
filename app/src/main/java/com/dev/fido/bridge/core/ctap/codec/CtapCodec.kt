@@ -7,6 +7,9 @@ import com.dev.fido.bridge.core.ctap.model.CredentialDescriptor
 import com.dev.fido.bridge.core.ctap.model.Ctap2Request
 import com.dev.fido.bridge.core.ctap.model.Ctap2Response
 import com.dev.fido.bridge.core.ctap.model.CtapStatus
+import com.dev.fido.bridge.core.ctap.model.PrfExtensionInput
+import com.dev.fido.bridge.core.ctap.model.PrfExtensionOutput
+import com.dev.fido.bridge.core.ctap.model.PrfValues
 import java.io.ByteArrayOutputStream
 import java.util.Arrays
 
@@ -136,6 +139,9 @@ object CtapCodec {
         // Extract excludeList (key 5) to prevent duplicate credential registration on the authenticator
         val excludeList = parseDescriptorList(map[5L], "excludeList")
 
+        // Extract optional PRF extension input from extensions map (key 6) per WebAuthn Level 3 §10.1.4
+        val prf = parsePrfExtensionInput(map[6L], "MakeCredential.extensions")
+
         // Extract and strictly type-check options (key 7) such as resident key (rk) and user verification (uv) requirements per CTAP 2.3 §6.1.2
         val options = parseOptionsMap(map[7L], "MakeCredential.options")
 
@@ -175,7 +181,8 @@ object CtapCodec {
             userDisplayName = userDisplayName,
             pubKeyCredParams = pubKeyCredParams,
             excludeList = excludeList,
-            options = options
+            options = options,
+            prf = prf
         )
     }
 
@@ -191,6 +198,9 @@ object CtapCodec {
         }
 
         val allowList = parseDescriptorList(map[3L], "allowList")
+
+        // Extract optional PRF extension input from extensions map (key 4) per WebAuthn Level 3 §10.1.4
+        val prf = parsePrfExtensionInput(map[4L], "GetAssertion.extensions")
 
         // Validate CTAP2 options (key 5) per CTAP 2.3 §6.2.2 Step 4
         val options = parseOptionsMap(map[5L], "GetAssertion.options")
@@ -210,8 +220,59 @@ object CtapCodec {
             clientDataHash = clientDataHash,
             allowList = allowList,
             userVerification = uvFlag.toWebAuthnUv(),
-            userPresence = upFlag
+            userPresence = upFlag,
+            prf = prf
         )
+    }
+
+    /**
+     * Parse optional CTAP2 hybrid "prf" extension dictionary from extensions CBOR map.
+     */
+    private fun parsePrfExtensionInput(rawExtensions: Any?, fieldName: String): PrfExtensionInput? {
+        if (rawExtensions == null) return null
+        val extMap = rawExtensions as? Map<*, *>
+            ?: throw CtapCodecException(CtapStatus.ERR_CBOR_UNEXPECTED_TYPE, "$fieldName must be a CBOR map")
+        val prfMap = extMap["prf"] as? Map<*, *> ?: return null
+
+        val eval = (prfMap["eval"] as? Map<*, *>)?.let(::parsePrfValuesMap)
+        // Require Base64URL-encoded credential ID text strings as evalByCredential keys per WebAuthn Level 3 §10.1.4
+        val evalByCred = (prfMap["evalByCredential"] as? Map<*, *>)?.entries?.mapNotNull { (k, v) ->
+            val credIdB64 = (k as? String)?.takeIf { it.isNotEmpty() } ?: return@mapNotNull null
+            val vals = (v as? Map<*, *>)?.let(::parsePrfValuesMap) ?: return@mapNotNull null
+            credIdB64 to vals
+        }?.toMap()?.takeIf { it.isNotEmpty() }
+
+        return PrfExtensionInput(eval = eval, evalByCredential = evalByCred)
+    }
+
+    private fun parsePrfValuesMap(map: Map<*, *>): PrfValues? {
+        val first = (map["first"] as? ByteArray)?.takeIf { it.size == 32 } ?: return null
+        val second = (map["second"] as? ByteArray)?.takeIf { it.size == 32 }
+        return PrfValues(first = first, second = second)
+    }
+
+    /**
+     * Decode PrfExtensionOutput from unsignedExtensionOutputs CBOR map (key 6 in MakeCredential, key 8 in GetAssertion).
+     */
+    internal fun decodePrfExtensionOutput(rawUnsignedExt: Any?): PrfExtensionOutput? {
+        val prfMap = (rawUnsignedExt as? Map<*, *>)?.get("prf") as? Map<*, *> ?: return null
+        val enabled = prfMap["enabled"] as? Boolean
+        val results = (prfMap["results"] as? Map<*, *>)?.let(::parsePrfValuesMap)
+        if (enabled == null && results == null) return null
+        return PrfExtensionOutput(enabled = enabled, results = results)
+    }
+
+    /**
+     * Serialize PrfExtensionOutput into a CBOR map for unsignedExtensionOutputs["prf"].
+     */
+    private fun encodePrfExtensionOutput(prf: PrfExtensionOutput): Map<String, Any> = buildMap {
+        prf.enabled?.let { put("enabled", it) }
+        prf.results?.let { res ->
+            put("results", buildMap<String, Any> {
+                put("first", res.first)
+                res.second?.let { put("second", it) }
+            })
+        }
     }
 
     /**
@@ -284,11 +345,13 @@ object CtapCodec {
                 byteArrayOf(CtapStatus.SUCCESS) + SimpleCbor.write(AuthenticatorInfo.toCborMap(response))
             }
             is Ctap2Response.MakeCredentialResponse -> {
-                val map = mapOf(
+                val map = mutableMapOf<Long, Any>(
                     1L to response.fmt,
                     2L to response.authData,
                     3L to response.attStmt
                 )
+                // Populate unsignedExtensionOutputs (key 6) when PRF output is present per CTAP 2.3 §6.1
+                response.prf?.let { map[6L] = mapOf("prf" to encodePrfExtensionOutput(it)) }
                 byteArrayOf(CtapStatus.SUCCESS) + SimpleCbor.write(map)
             }
             is Ctap2Response.GetAssertionResponse -> {
@@ -303,6 +366,9 @@ object CtapCodec {
                 if (response.userSelected) {
                     map[6L] = true
                 }
+                // Populate unsignedExtensionOutputs (key 8) when PRF output is present per CTAP 2.3 §6.2
+                // (key 7 is reserved for largeBlobKey byte string)
+                response.prf?.let { map[8L] = mapOf("prf" to encodePrfExtensionOutput(it)) }
                 byteArrayOf(CtapStatus.SUCCESS) + SimpleCbor.write(map)
             }
         }
@@ -323,7 +389,8 @@ object CtapCodec {
             if (bytes.isEmpty()) {
                 throw CtapCodecException(CtapStatus.ERR_INVALID_CBOR, "Empty CBOR byte stream")
             }
-            val maxDepth = if (strict) 4 else 8
+            // Allow up to 5 container nesting levels in strict mode to accommodate extensions.prf.evalByCredential.<credId> maps
+            val maxDepth = if (strict) 5 else 8
             var pos = 0
             fun readByte(): Int {
                 if (pos >= bytes.size) throw CtapCodecException(CtapStatus.ERR_INVALID_CBOR, "Unexpected end of CBOR stream")
@@ -515,6 +582,7 @@ object CtapCodec {
                         out.write((bits ushr 8).toInt())
                         out.write(bits.toInt())
                     }
+                    is Boolean -> out.write(if (v) 0xF5 else 0xF4)
                     is ByteArray -> { writeMajor(2, v.size.toLong()); out.write(v) }
                     is String -> { val b = v.toByteArray(Charsets.UTF_8); writeMajor(3, b.size.toLong()); out.write(b) }
                     is List<*> -> { writeMajor(4, v.size.toLong()); v.forEach { writeItem(it) } }
@@ -531,7 +599,6 @@ object CtapCodec {
                             writeItem(vl)
                         }
                     }
-                    is Boolean -> out.write(if (v) 0xF5 else 0xF4)
                     else -> throw CtapCodecException(
                         CtapStatus.ERR_INVALID_CBOR,
                         "Unsupported CBOR value type: ${v.javaClass.simpleName}"

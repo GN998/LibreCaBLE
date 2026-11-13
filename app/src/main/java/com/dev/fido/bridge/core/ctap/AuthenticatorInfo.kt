@@ -15,7 +15,8 @@ object AuthenticatorInfo {
             // Advertise FIDO_2_0 and FIDO_2_1 with built-in UV (uv = true, alwaysUv = true) and no pinUvAuthProtocols
             // so CTAP 2.1+ platforms delegate user verification directly to Android CredentialManager per CTAP 2.3 §6.1.1
             versions = listOf("FIDO_2_0", "FIDO_2_1"),
-            extensions = emptyList(),
+            // Advertise WebAuthn PRF extension support so hybrid clients send pre-hashed "prf" dictionaries over the Noise tunnel
+            extensions = listOf("prf"),
             aaguid = ByteArray(16),
             options = mapOf(
                 "plat" to false,
