@@ -28,7 +28,7 @@ object CtapMapper {
             req.allowList?.takeIf { it.isNotEmpty() }?.let { list ->
                 put("allowCredentials", list.toJsonArray())
             }
-            req.prf?.let { prf ->
+            req.prf?.takeIf { it.hasEvaluationInputs() }?.let { prf ->
                 put("extensions", JSONObject().put("prf", prf.toJsonObject()))
             }
         }.toString()
@@ -66,11 +66,18 @@ object CtapMapper {
             // attestation statements (fmt, attStmt) and AAGUID are preserved over CTAP2; the client
             // platform remains responsible for applying the RP's attestation conveyance preference.
             put("attestation", "direct")
-            req.prf?.let { prf ->
+            // Forward "prf" during MakeCredential only when immediate evaluation salts are present;
+            // Windows 11 unconditionally sends an empty {"prf": {}} whenever GetInfo advertises "prf",
+            // which otherwise causes hardware-key providers to emit a signed {"hmac-secret": true}
+            // extension in authData that Chromium rejects when the RP did not request PRF.
+            req.prf?.takeIf { it.hasEvaluationInputs() }?.let { prf ->
                 put("extensions", JSONObject().put("prf", prf.toJsonObject()))
             }
         }.toString()
     }
+
+    private fun PrfExtensionInput.hasEvaluationInputs(): Boolean =
+        eval != null || !evalByCredential.isNullOrEmpty()
 
     /**
      * Serialize pre-hashed CTAP2 PRF inputs into WebAuthn JSON with "prfAlreadyHashed": true
@@ -83,9 +90,7 @@ object CtapMapper {
                 map.forEach { (credIdB64, vals) -> put(credIdB64, vals.toJsonObject()) }
             })
         }
-        if (eval != null || !evalByCredential.isNullOrEmpty()) {
-            put("prfAlreadyHashed", true)
-        }
+        put("prfAlreadyHashed", true)
     }
 
     private fun PrfValues.toJsonObject(): JSONObject = JSONObject().apply {
@@ -165,7 +170,10 @@ object CtapMapper {
         )
     }
 
-    fun parseMakeCredentialResponseJson(jsonResponseStr: String): Ctap2Response.MakeCredentialResponse {
+    fun parseMakeCredentialResponseJson(
+        jsonResponseStr: String,
+        prfInput: PrfExtensionInput? = null
+    ): Ctap2Response.MakeCredentialResponse {
         val rootObj = JSONObject(jsonResponseStr)
         val responseObj = rootObj.getJSONObject("response")
         val attestationObjectBytes = CryptoUtils.decodeBase64Url(responseObj.getString("attestationObject"))
@@ -174,11 +182,20 @@ object CtapMapper {
         val map = CtapCodec.SimpleCbor.read(attestationObjectBytes, strict = false) as? Map<*, *>
             ?: throw CtapCodecException(CtapStatus.ERR_INVALID_CBOR, "attestationObject must be a CBOR map")
 
+        // Report enabled=false when evaluation salts were forwarded to the provider but it returned no PRF output;
+        // report enabled=true only when an empty MakeCredential "prf" dictionary was withheld to keep hardware authData clean.
+        val prfOutput = parsePrfOutputFromClientExtensionResults(rootObj, isRegistration = true)
+            ?: when {
+                prfInput == null -> null
+                prfInput.hasEvaluationInputs() -> PrfExtensionOutput(enabled = false)
+                else -> PrfExtensionOutput(enabled = true)
+            }
+
         return Ctap2Response.MakeCredentialResponse(
             fmt = map.requireField("fmt", "attestationObject.fmt"),
             authData = map.requireField("authData", "attestationObject.authData"),
             attStmt = map.requireField("attStmt", "attestationObject.attStmt"),
-            prf = parsePrfOutputFromClientExtensionResults(rootObj, isRegistration = true)
+            prf = prfOutput
         )
     }
 }

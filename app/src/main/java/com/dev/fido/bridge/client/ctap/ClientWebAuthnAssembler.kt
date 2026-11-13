@@ -200,8 +200,11 @@ object ClientWebAuthnAssembler {
         return PrfValues(first = firstBytes, second = secondBytes)
     }
 
-    private fun PrfExtensionOutput.toClientExtensionJson(): JSONObject = JSONObject().apply {
-        enabled?.let { put("enabled", it) }
+    private fun PrfExtensionOutput.toClientExtensionJson(isRegistration: Boolean): JSONObject = JSONObject().apply {
+        // Populate "enabled" exclusively during registration per WebAuthn Level 3 §10.1.4
+        if (isRegistration) {
+            put("enabled", enabled ?: (results != null))
+        }
         results?.let { res ->
             put("results", JSONObject().apply {
                 put("first", CryptoUtils.encodeBase64UrlNoPadding(res.first))
@@ -216,7 +219,8 @@ object ClientWebAuthnAssembler {
     fun buildGetAssertionResponseJson(
         response: Ctap2Response.GetAssertionResponse,
         clientDataJsonBytes: ByteArray,
-        fallbackAllowList: List<CredentialDescriptor>? = null
+        fallbackAllowList: List<CredentialDescriptor>? = null,
+        prfRequested: Boolean = false
     ): String {
         val effectiveCredId = response.credentialId.takeIf { it.isNotEmpty() }
             ?: fallbackAllowList?.firstOrNull()?.id
@@ -224,7 +228,12 @@ object ClientWebAuthnAssembler {
         val credIdB64 = CryptoUtils.encodeBase64UrlNoPadding(effectiveCredId)
 
         val clientExtensionResults = JSONObject().apply {
-            response.prf?.let { put("prf", it.toClientExtensionJson()) }
+            // Initialize "prf" to an empty dictionary when requested in GetAssertion per WebAuthn Level 3 §10.1.4
+            if (response.prf != null) {
+                put("prf", response.prf.toClientExtensionJson(isRegistration = false))
+            } else if (prfRequested) {
+                put("prf", JSONObject())
+            }
         }
 
         return JSONObject().apply {
@@ -277,7 +286,7 @@ object ClientWebAuthnAssembler {
                 put("credProps", JSONObject().put("rk", isDiscoverableKey))
             }
             if (response.prf != null) {
-                put("prf", response.prf.toClientExtensionJson())
+                put("prf", response.prf.toClientExtensionJson(isRegistration = true))
             } else if (prfRequested) {
                 // Report enabled=false when the Relying Party requested PRF at registration but the authenticator does not support it per WebAuthn Level 3 §10.1.4
                 put("prf", JSONObject().put("enabled", false))

@@ -89,7 +89,10 @@ class CredentialManagerProxy(private val context: Context) {
 
             val responseJson = pubKeyResponse.registrationResponseJson
             Log.d("CredentialManagerProxy", "Raw registrationResponseJson: $responseJson")
-            CtapMapper.parseMakeCredentialResponseJson(responseJson)
+            CtapMapper.parseMakeCredentialResponseJson(
+                jsonResponseStr = responseJson,
+                prfInput = req.prf
+            )
         }
     }
 
