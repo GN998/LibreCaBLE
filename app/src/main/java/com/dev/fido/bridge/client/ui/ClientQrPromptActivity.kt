@@ -329,11 +329,12 @@ class ClientQrPromptActivity : AppCompatActivity() {
 
         when (response) {
             is Ctap2Response.GetAssertionResponse -> {
-                val allowList = (prepared.ctapRequest as? Ctap2Request.GetAssertion)?.allowList
+                val getAssertReq = prepared.ctapRequest as? Ctap2Request.GetAssertion
                 val responseJson = ClientWebAuthnAssembler.buildGetAssertionResponseJson(
                     response = response,
                     clientDataJsonBytes = prepared.clientDataJsonBytes,
-                    fallbackAllowList = allowList
+                    fallbackAllowList = getAssertReq?.allowList,
+                    prfRequested = getAssertReq?.prf != null
                 )
                 val resultIntent = Intent()
                 PendingIntentHandler.setGetCredentialResponse(
