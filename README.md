@@ -5,8 +5,8 @@ LibreCaBLE is a lightweight, GMS-free FIDO2 hybrid transport (caBLE v2 / CTAP 2.
 
 ## Core Features
 
-* **CMHD / Roaming Authenticator Mode**: Handles `FIDO:/` URIs for QR-initiated transactions (CTAP 2.3 §11.5.1), broadcasts `0xFFF9` BLE proximity advertisements, and dispatches CTAP2 commands to Android's `CredentialManager` with privileged `origin` and `clientDataHash` binding.
-* **Client Platform Mode**: Implements Android's `CredentialProviderService` to initiate hybrid ceremonies, rendering digit-encoded `FIDO:/` QR payloads, scanning for `0xFFF9` BLE advertisements, and assembling WebAuthn responses (`COSE_Key` to SPKI conversion, `credProps`, and `privileged_apps.json` origin verification).
+* **CMHD / Roaming Authenticator Mode**: Handles `FIDO:/` URIs for QR-initiated transactions (CTAP 2.3 §11.5.1), broadcasts `0xFFF9` BLE proximity advertisements, and dispatches CTAP2 commands (including pre-hashed `prf` inputs) to Android's `CredentialManager` with privileged `origin` and `clientDataHash` binding.
+* **Client Platform Mode**: Implements Android's `CredentialProviderService` to initiate hybrid ceremonies, rendering digit-encoded `FIDO:/` QR payloads, scanning for `0xFFF9` BLE advertisements, and assembling WebAuthn responses (`COSE_Key` to SPKI conversion, `credProps`, `prf`, and `privileged_apps.json` origin verification).
 * **CTAP 2.3 Hybrid Transport & Encoding**: Full `Noise_KNpsk0_P256_AESGCM_SHA256` handshakes, direct BLE L2CAP CoC channels with automatic WebSocket tunnel fallback (assigned ID `0` or hashed IDs `256–65535`), and a zero-dependency **CTAP2 canonical CBOR** codec supporting `authenticatorMakeCredential (0x01)`, `authenticatorGetAssertion (0x02)`, `authenticatorGetInfo (0x04)`, and `authenticatorSelection (0x0B)`.
 
 ## Requirements
@@ -17,10 +17,6 @@ LibreCaBLE is a lightweight, GMS-free FIDO2 hybrid transport (caBLE v2 / CTAP 2.
    * An external camera or QR scanner app that dispatches `VIEW` intents for `FIDO:/` URIs.
    * *(Optional)* Custom tunnel domain ID can be configured via **⋮ > Extended Domain Settings** .
 3. **Client Platform Mode**: Enable **LibreCaBLE** in Android *Settings > Passwords & passkeys* (or via **⋮ > Enable Client Provider**).
-
-## Roadmap
-
-* WebAuthn prf Extension (hmac-secret): Planned support for credential-scoped PRF evaluation during cross-device ceremonies.
 
 ## License & Acknowledgments
 
