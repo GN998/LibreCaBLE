@@ -14,6 +14,7 @@ import androidx.credentials.exceptions.domerrors.NotSupportedError
 import androidx.credentials.exceptions.publickeycredential.CreatePublicKeyCredentialDomException
 import androidx.credentials.exceptions.publickeycredential.GetPublicKeyCredentialDomException
 import com.dev.fido.bridge.core.ctap.AuthenticatorInfo
+import com.dev.fido.bridge.core.ctap.codec.CtapCodecException
 import com.dev.fido.bridge.core.ctap.model.Ctap2Request
 import com.dev.fido.bridge.core.ctap.model.Ctap2Response
 import com.dev.fido.bridge.core.ctap.model.CtapStatus
@@ -40,50 +41,54 @@ class CredentialManagerProxy(private val context: Context) {
             return Ctap2Response.ErrorResponse(CtapStatus.ERR_NO_CREDENTIALS)
         }
 
-        val jsonRequest = CtapMapper.toWebAuthnGetCredentialJson(req)
-        val trustedOrigin = "https://${req.rpId}"
-
-        // Strip sensitive WebAuthn request/response payloads from release logs via R8 assumenosideeffects
-        // and avoid eager ByteArray.toHex() string allocations on the main thread before UI dispatch.
-        Log.d("CredentialManagerProxy", "Dispatching GetAssertion for origin: $trustedOrigin")
-
-        // Enforce strict privileged request with both setOrigin and PC's raw clientDataHash.
-        // Never fall back to an unprivileged request without setOrigin, as doing so causes
-        // providers to hash an Android-generated clientDataJSON and invalidates the signature.
-        val option = GetPublicKeyCredentialOption(
-            requestJson = jsonRequest,
-            clientDataHash = req.clientDataHash
-        )
-        val getReq = GetCredentialRequest.Builder()
-            .addCredentialOption(option)
-            .setOrigin(trustedOrigin)
-            .build()
-
         return executePrivilegedRequest("GetCredential") {
+            val jsonRequest = CtapMapper.toWebAuthnGetCredentialJson(req)
+            val trustedOrigin = "https://${req.rpId}"
+
+            // Strip sensitive WebAuthn request/response payloads from release logs via R8 assumenosideeffects
+            // and avoid eager ByteArray.toHex() string allocations on the main thread before UI dispatch.
+            Log.d("CredentialManagerProxy", "Dispatching GetAssertion for origin: $trustedOrigin")
+
+            // Enforce strict privileged request with both setOrigin and PC's raw clientDataHash.
+            // Never fall back to an unprivileged request without setOrigin, as doing so causes
+            // providers to hash an Android-generated clientDataJSON and invalidates the signature.
+            val option = GetPublicKeyCredentialOption(
+                requestJson = jsonRequest,
+                clientDataHash = req.clientDataHash
+            )
+            val getReq = GetCredentialRequest.Builder()
+                .addCredentialOption(option)
+                .setOrigin(trustedOrigin)
+                .build()
+
             val result = credentialManager.getCredential(context, getReq)
             val pubKeyCredential = result.credential as PublicKeyCredential
 
             val responseJson = pubKeyCredential.authenticationResponseJson
             Log.d("CredentialManagerProxy", "Raw authenticationResponseJson: $responseJson")
-            CtapMapper.parseAssertionResponseJson(responseJson, req.allowList)
+            CtapMapper.parseAssertionResponseJson(
+                jsonResponseStr = responseJson,
+                allowList = req.allowList,
+                largeBlobInput = req.largeBlob
+            )
         }
     }
 
     private suspend fun handleMakeCredential(req: Ctap2Request.MakeCredential): Ctap2Response {
-        val jsonRequest = CtapMapper.toWebAuthnCreateCredentialJson(req)
-        val trustedOrigin = "https://${req.rpId}"
-
-        Log.d("CredentialManagerProxy", "MakeCredential Request JSON: $jsonRequest")
-
-        // Enforce strict privileged request with explicit origin and PC's raw clientDataHash.
-        val createReq = CreatePublicKeyCredentialRequest(
-            requestJson = jsonRequest,
-            clientDataHash = req.clientDataHash,
-            origin = trustedOrigin,
-            preferImmediatelyAvailableCredentials = false
-        )
-
         return executePrivilegedRequest("CreateCredential") {
+            val jsonRequest = CtapMapper.toWebAuthnCreateCredentialJson(req)
+            val trustedOrigin = "https://${req.rpId}"
+
+            Log.d("CredentialManagerProxy", "MakeCredential Request JSON: $jsonRequest")
+
+            // Enforce strict privileged request with explicit origin and PC's raw clientDataHash.
+            val createReq = CreatePublicKeyCredentialRequest(
+                requestJson = jsonRequest,
+                clientDataHash = req.clientDataHash,
+                origin = trustedOrigin,
+                preferImmediatelyAvailableCredentials = false
+            )
+
             val result = credentialManager.createCredential(context, createReq)
             val pubKeyResponse = result as CreatePublicKeyCredentialResponse
 
@@ -91,13 +96,14 @@ class CredentialManagerProxy(private val context: Context) {
             Log.d("CredentialManagerProxy", "Raw registrationResponseJson: $responseJson")
             CtapMapper.parseMakeCredentialResponseJson(
                 jsonResponseStr = responseJson,
-                prfInput = req.prf
+                prfInput = req.prf,
+                largeBlobInput = req.largeBlob
             )
         }
     }
 
     /**
-     * Execute privileged CredentialManager calls and translate DOM or security exceptions into standard CTAP2 error responses.
+     * Execute privileged CredentialManager calls and translate DOM, codec, or security exceptions into standard CTAP2 error responses.
      */
     private suspend inline fun executePrivilegedRequest(
         operationName: String,
@@ -107,6 +113,10 @@ class CredentialManagerProxy(private val context: Context) {
     } catch (e: CancellationException) {
         // Propagate coroutine cancellation to preserve structured concurrency and prevent sending spurious error frames on closed sessions
         throw e
+    } catch (e: CtapCodecException) {
+        // Preserve exact CTAP2 status codes (e.g., 0x12 ERR_INVALID_CBOR or 0x18 ERR_LARGE_BLOB_STORAGE_FULL)
+        Log.w("CredentialManagerProxy", "$operationName rejected with CTAP status 0x${"%02X".format(e.statusCode)}: ${e.message}")
+        Ctap2Response.ErrorResponse(e.statusCode)
     } catch (e: SecurityException) {
         Log.e("CredentialManagerProxy", "SecurityException during $operationName: check provider allowlist or CREDENTIAL_MANAGER_SET_ORIGIN", e)
         Ctap2Response.ErrorResponse(CtapStatus.ERR_OPERATION_DENIED)

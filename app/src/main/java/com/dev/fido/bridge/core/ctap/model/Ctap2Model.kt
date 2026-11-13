@@ -24,6 +24,28 @@ data class PrfExtensionOutput(
     val results: PrfValues? = null
 )
 
+/**
+ * Represent CTAP 2.3 §12.4 largeBlob extension request inputs.
+ * On the CTAP wire, [write] carries RFC 1951 DEFLATE-compressed bytes alongside [originalSize].
+ */
+data class LargeBlobExtensionInput(
+    val support: String? = null,
+    val read: Boolean? = null,
+    val write: ByteArray? = null,
+    val originalSize: Long? = null
+)
+
+/**
+ * Represent CTAP 2.3 §12.4 largeBlob extension response outputs carried in unsignedExtensionOutputs["largeBlob"].
+ * On the CTAP wire, [blob] carries RFC 1951 DEFLATE-compressed bytes alongside [originalSize].
+ */
+data class LargeBlobExtensionOutput(
+    val supported: Boolean? = null,
+    val blob: ByteArray? = null,
+    val originalSize: Long? = null,
+    val written: Boolean? = null
+)
+
 sealed class Ctap2Request {
     // Use singleton data objects to avoid allocating dummy fields for stateless GetInfo and Selection requests
     data object GetInfo : Ctap2Request()
@@ -36,7 +58,8 @@ sealed class Ctap2Request {
         val userVerification: String,
         // Default "up" to true per CTAP 2.3 §6.2.2 Step 4.5; false indicates a silent pre-flight probe
         val userPresence: Boolean = true,
-        val prf: PrfExtensionInput? = null
+        val prf: PrfExtensionInput? = null,
+        val largeBlob: LargeBlobExtensionInput? = null
     ) : Ctap2Request()
 
     data class MakeCredential(
@@ -49,7 +72,8 @@ sealed class Ctap2Request {
         val pubKeyCredParams: List<Map<String, Any>>,
         val excludeList: List<CredentialDescriptor>? = null,
         val options: Map<String, Boolean>? = null,
-        val prf: PrfExtensionInput? = null
+        val prf: PrfExtensionInput? = null,
+        val largeBlob: LargeBlobExtensionInput? = null
     ) : Ctap2Request()
 }
 
@@ -80,14 +104,16 @@ sealed class Ctap2Response {
         val userHandle: ByteArray? = null,
         // Indicate whether a credential was explicitly selected via the authenticator UI per CTAP 2.3 §6.2.2
         val userSelected: Boolean = false,
-        val prf: PrfExtensionOutput? = null
+        val prf: PrfExtensionOutput? = null,
+        val largeBlob: LargeBlobExtensionOutput? = null
     ) : Ctap2Response()
 
     data class MakeCredentialResponse(
         val fmt: String,
         val authData: ByteArray,
         val attStmt: Map<*, *>,
-        val prf: PrfExtensionOutput? = null
+        val prf: PrfExtensionOutput? = null,
+        val largeBlob: LargeBlobExtensionOutput? = null
     ) : Ctap2Response()
 
     data class ErrorResponse(val errorCode: Byte) : Ctap2Response()

@@ -8,6 +8,8 @@ import com.dev.fido.bridge.core.ctap.model.CredentialDescriptor
 import com.dev.fido.bridge.core.ctap.model.Ctap2Request
 import com.dev.fido.bridge.core.ctap.model.Ctap2Response
 import com.dev.fido.bridge.core.ctap.model.CtapStatus
+import com.dev.fido.bridge.core.ctap.model.LargeBlobExtensionInput
+import com.dev.fido.bridge.core.ctap.model.LargeBlobExtensionOutput
 import com.dev.fido.bridge.core.ctap.model.PrfExtensionInput
 import com.dev.fido.bridge.core.ctap.model.PrfExtensionOutput
 import com.dev.fido.bridge.core.ctap.model.PrfValues
@@ -28,8 +30,30 @@ object CtapMapper {
             req.allowList?.takeIf { it.isNotEmpty() }?.let { list ->
                 put("allowCredentials", list.toJsonArray())
             }
+
+            val extensionsObj = JSONObject()
             req.prf?.takeIf { it.hasEvaluationInputs() }?.let { prf ->
-                put("extensions", JSONObject().put("prf", prf.toJsonObject()))
+                extensionsObj.put("prf", prf.toJsonObject())
+            }
+            req.largeBlob?.let { lb ->
+                when {
+                    lb.read == true -> extensionsObj.put("largeBlob", JSONObject().put("read", true))
+                    lb.write != null && lb.originalSize != null -> {
+                        // Decompress CTAP 2.3 §12.4 DEFLATE payload before forwarding raw bytes to Android CredentialManager,
+                        // and forward write only when allowList is non-empty per CTAP 2.3 §12.4 Step 4.2.
+                        val rawBytes = CryptoUtils.inflateRaw(lb.write, lb.originalSize)
+                            ?: throw CtapCodecException(CtapStatus.ERR_INVALID_CBOR, "Failed to inflate largeBlob.write payload")
+                        if (!req.allowList.isNullOrEmpty()) {
+                            extensionsObj.put(
+                                "largeBlob",
+                                JSONObject().put("write", CryptoUtils.encodeBase64UrlNoPadding(rawBytes))
+                            )
+                        }
+                    }
+                }
+            }
+            if (extensionsObj.length() > 0) {
+                put("extensions", extensionsObj)
             }
         }.toString()
     }
@@ -66,12 +90,20 @@ object CtapMapper {
             // attestation statements (fmt, attStmt) and AAGUID are preserved over CTAP2; the client
             // platform remains responsible for applying the RP's attestation conveyance preference.
             put("attestation", "direct")
+
+            val extensionsObj = JSONObject()
             // Forward "prf" during MakeCredential only when immediate evaluation salts are present;
             // Windows 11 unconditionally sends an empty {"prf": {}} whenever GetInfo advertises "prf",
             // which otherwise causes hardware-key providers to emit a signed {"hmac-secret": true}
             // extension in authData that Chromium rejects when the RP did not request PRF.
             req.prf?.takeIf { it.hasEvaluationInputs() }?.let { prf ->
-                put("extensions", JSONObject().put("prf", prf.toJsonObject()))
+                extensionsObj.put("prf", prf.toJsonObject())
+            }
+            req.largeBlob?.support?.let { support ->
+                extensionsObj.put("largeBlob", JSONObject().put("support", support))
+            }
+            if (extensionsObj.length() > 0) {
+                put("extensions", extensionsObj)
             }
         }.toString()
     }
@@ -140,7 +172,8 @@ object CtapMapper {
 
     fun parseAssertionResponseJson(
         jsonResponseStr: String,
-        allowList: List<CredentialDescriptor>? = null
+        allowList: List<CredentialDescriptor>? = null,
+        largeBlobInput: LargeBlobExtensionInput? = null
     ): Ctap2Response.GetAssertionResponse {
         val rootObj = JSONObject(jsonResponseStr)
         // Extract selected credential ID from authenticationResponseJson first so multi-credential allowLists return the exact match
@@ -159,6 +192,29 @@ object CtapMapper {
             null
         }
 
+        val lbObj = rootObj.optJSONObject("clientExtensionResults")?.optJSONObject("largeBlob")
+        val largeBlobOutput = when {
+            largeBlobInput?.read == true -> {
+                val blobB64 = lbObj?.optString("blob", "") ?: ""
+                if (blobB64.isNotEmpty()) {
+                    val rawBlob = CryptoUtils.decodeBase64Url(blobB64)
+                    // Compress raw WebAuthn blob with RFC 1951 DEFLATE and attach uncompressed originalSize per CTAP 2.3 §12.4 Step 3.2
+                    LargeBlobExtensionOutput(
+                        blob = CryptoUtils.deflateRaw(rawBlob),
+                        originalSize = rawBlob.size.toLong()
+                    )
+                } else {
+                    // Omit unsignedExtensionOutputs["largeBlob"] when no blob exists for the credential per CTAP 2.3 §12.4 Step 3.1
+                    null
+                }
+            }
+            largeBlobInput?.write != null -> {
+                val written = !allowList.isNullOrEmpty() && (lbObj?.optBoolean("written", false) == true)
+                LargeBlobExtensionOutput(written = written)
+            }
+            else -> null
+        }
+
         return Ctap2Response.GetAssertionResponse(
             credentialId = credentialId,
             authenticatorData = CryptoUtils.decodeBase64Url(responseObj.getString("authenticatorData")),
@@ -166,13 +222,15 @@ object CtapMapper {
             userHandle = userHandle,
             // Set userSelected to true when the user selected a discoverable credential on the authenticator UI per CTAP 2.3 §6.2.2
             userSelected = allowList.isNullOrEmpty(),
-            prf = parsePrfOutputFromClientExtensionResults(rootObj)
+            prf = parsePrfOutputFromClientExtensionResults(rootObj),
+            largeBlob = largeBlobOutput
         )
     }
 
     fun parseMakeCredentialResponseJson(
         jsonResponseStr: String,
-        prfInput: PrfExtensionInput? = null
+        prfInput: PrfExtensionInput? = null,
+        largeBlobInput: LargeBlobExtensionInput? = null
     ): Ctap2Response.MakeCredentialResponse {
         val rootObj = JSONObject(jsonResponseStr)
         val responseObj = rootObj.getJSONObject("response")
@@ -191,11 +249,27 @@ object CtapMapper {
                 else -> PrfExtensionOutput(enabled = true)
             }
 
+        val lbSupported = rootObj.optJSONObject("clientExtensionResults")
+            ?.optJSONObject("largeBlob")
+            ?.optBoolean("supported", false) == true
+        // Return {"supported": true} when supported, throw ERR_LARGE_BLOB_STORAGE_FULL (0x18) when support == "required"
+        // and unsupported, or omit unsignedExtensionOutputs["largeBlob"] when support == "preferred" per CTAP 2.3 §12.4 Step 2-3.
+        val largeBlobOutput = when {
+            largeBlobInput == null -> null
+            lbSupported -> LargeBlobExtensionOutput(supported = true)
+            largeBlobInput.support == "required" -> throw CtapCodecException(
+                CtapStatus.ERR_LARGE_BLOB_STORAGE_FULL,
+                "Credential provider does not support required largeBlob extension"
+            )
+            else -> null
+        }
+
         return Ctap2Response.MakeCredentialResponse(
             fmt = map.requireField("fmt", "attestationObject.fmt"),
             authData = map.requireField("authData", "attestationObject.authData"),
             attStmt = map.requireField("attStmt", "attestationObject.attStmt"),
-            prf = prfOutput
+            prf = prfOutput,
+            largeBlob = largeBlobOutput
         )
     }
 }

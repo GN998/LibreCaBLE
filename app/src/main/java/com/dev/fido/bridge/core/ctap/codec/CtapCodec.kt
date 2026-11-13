@@ -7,6 +7,8 @@ import com.dev.fido.bridge.core.ctap.model.CredentialDescriptor
 import com.dev.fido.bridge.core.ctap.model.Ctap2Request
 import com.dev.fido.bridge.core.ctap.model.Ctap2Response
 import com.dev.fido.bridge.core.ctap.model.CtapStatus
+import com.dev.fido.bridge.core.ctap.model.LargeBlobExtensionInput
+import com.dev.fido.bridge.core.ctap.model.LargeBlobExtensionOutput
 import com.dev.fido.bridge.core.ctap.model.PrfExtensionInput
 import com.dev.fido.bridge.core.ctap.model.PrfExtensionOutput
 import com.dev.fido.bridge.core.ctap.model.PrfValues
@@ -139,8 +141,9 @@ object CtapCodec {
         // Extract excludeList (key 5) to prevent duplicate credential registration on the authenticator
         val excludeList = parseDescriptorList(map[5L], "excludeList")
 
-        // Extract optional PRF extension input from extensions map (key 6) per WebAuthn Level 3 §10.1.4
+        // Extract optional PRF and largeBlob extension inputs from extensions map (key 6) per WebAuthn Level 3 §10.1.4 & CTAP 2.3 §12.4
         val prf = parsePrfExtensionInput(map[6L], "MakeCredential.extensions")
+        val largeBlob = parseLargeBlobMakeCredInput(map[6L])
 
         // Extract and strictly type-check options (key 7) such as resident key (rk) and user verification (uv) requirements per CTAP 2.3 §6.1.2
         val options = parseOptionsMap(map[7L], "MakeCredential.options")
@@ -182,7 +185,8 @@ object CtapCodec {
             pubKeyCredParams = pubKeyCredParams,
             excludeList = excludeList,
             options = options,
-            prf = prf
+            prf = prf,
+            largeBlob = largeBlob
         )
     }
 
@@ -199,8 +203,9 @@ object CtapCodec {
 
         val allowList = parseDescriptorList(map[3L], "allowList")
 
-        // Extract optional PRF extension input from extensions map (key 4) per WebAuthn Level 3 §10.1.4
+        // Extract optional PRF and largeBlob extension inputs from extensions map (key 4) per WebAuthn Level 3 §10.1.4 & CTAP 2.3 §12.4
         val prf = parsePrfExtensionInput(map[4L], "GetAssertion.extensions")
+        val largeBlob = parseLargeBlobGetAssertInput(map[4L])
 
         // Validate CTAP2 options (key 5) per CTAP 2.3 §6.2.2 Step 4
         val options = parseOptionsMap(map[5L], "GetAssertion.options")
@@ -221,7 +226,8 @@ object CtapCodec {
             allowList = allowList,
             userVerification = uvFlag.toWebAuthnUv(),
             userPresence = upFlag,
-            prf = prf
+            prf = prf,
+            largeBlob = largeBlob
         )
     }
 
@@ -273,6 +279,90 @@ object CtapCodec {
                 res.second?.let { put("second", it) }
             })
         }
+    }
+
+    /**
+     * Parse optional CTAP 2.3 §12.4 MakeCredential "largeBlob" extension input (`{support: "required" / "preferred"}`).
+     */
+    private fun parseLargeBlobMakeCredInput(rawExtensions: Any?): LargeBlobExtensionInput? {
+        val extMap = rawExtensions as? Map<*, *> ?: return null
+        val lbObj = extMap["largeBlob"] ?: return null
+        val lbMap = lbObj as? Map<*, *>
+            ?: throw CtapCodecException(CtapStatus.ERR_INVALID_CBOR, "largeBlob in MakeCredential must be a CBOR map")
+        if (lbMap.keys != setOf<Any?>("support")) {
+            throw CtapCodecException(CtapStatus.ERR_INVALID_CBOR, "Invalid keys in MakeCredential largeBlob map")
+        }
+        val support = lbMap["support"] as? String
+            ?: throw CtapCodecException(CtapStatus.ERR_INVALID_CBOR, "largeBlob.support must be a text string")
+        if (support != "required" && support != "preferred") {
+            throw CtapCodecException(CtapStatus.ERR_INVALID_CBOR, "Invalid largeBlob.support value: $support")
+        }
+        return LargeBlobExtensionInput(support = support)
+    }
+
+    /**
+     * Parse optional CTAP 2.3 §12.4 GetAssertion "largeBlob" extension input (`{read: true}` XOR `{write: bstr, originalSize: uint}`).
+     */
+    private fun parseLargeBlobGetAssertInput(rawExtensions: Any?): LargeBlobExtensionInput? {
+        val extMap = rawExtensions as? Map<*, *> ?: return null
+        val lbObj = extMap["largeBlob"] ?: return null
+        val lbMap = lbObj as? Map<*, *>
+            ?: throw CtapCodecException(CtapStatus.ERR_INVALID_CBOR, "largeBlob in GetAssertion must be a CBOR map")
+
+        val hasRead = lbMap.containsKey("read")
+        val hasWrite = lbMap.containsKey("write")
+        val hasOrigSize = lbMap.containsKey("originalSize")
+
+        // Enforce CTAP 2.3 §12.4 Step 2 mutual exclusion: (read only) XOR (write + originalSize)
+        return when {
+            hasRead && !hasWrite && !hasOrigSize && lbMap.size == 1 -> {
+                if (lbMap["read"] != true) {
+                    throw CtapCodecException(CtapStatus.ERR_INVALID_CBOR, "largeBlob.read must be true")
+                }
+                LargeBlobExtensionInput(read = true)
+            }
+            !hasRead && hasWrite && hasOrigSize && lbMap.size == 2 -> {
+                val writeBytes = lbMap["write"] as? ByteArray
+                    ?: throw CtapCodecException(CtapStatus.ERR_INVALID_CBOR, "largeBlob.write must be a byte string")
+                val origSize = (lbMap["originalSize"] as? Long)?.takeIf { it >= 0L }
+                    ?: throw CtapCodecException(CtapStatus.ERR_INVALID_CBOR, "largeBlob.originalSize must be an unsigned integer")
+                LargeBlobExtensionInput(write = writeBytes, originalSize = origSize)
+            }
+            else -> throw CtapCodecException(
+                CtapStatus.ERR_INVALID_CBOR,
+                "largeBlob input must contain either 'read' or both 'write' and 'originalSize' per CTAP 2.3 §12.4"
+            )
+        }
+    }
+
+    /**
+     * Decode LargeBlobExtensionOutput from unsignedExtensionOutputs CBOR map (key 6 in MakeCredential, key 8 in GetAssertion).
+     */
+    internal fun decodeLargeBlobExtensionOutput(rawUnsignedExt: Any?): LargeBlobExtensionOutput? {
+        val lbMap = (rawUnsignedExt as? Map<*, *>)?.get("largeBlob") as? Map<*, *> ?: return null
+        val supported = lbMap["supported"] as? Boolean
+        val blob = lbMap["blob"] as? ByteArray
+        val originalSize = (lbMap["originalSize"] as? Number)?.toLong()?.takeIf { it >= 0L }
+        val written = lbMap["written"] as? Boolean
+        if (supported == null && (blob == null || originalSize == null) && written == null) return null
+        return LargeBlobExtensionOutput(
+            supported = supported,
+            blob = blob,
+            originalSize = originalSize,
+            written = written
+        )
+    }
+
+    /**
+     * Serialize LargeBlobExtensionOutput into a CBOR map for unsignedExtensionOutputs["largeBlob"] per CTAP 2.3 §12.4.
+     */
+    private fun encodeLargeBlobExtensionOutput(lb: LargeBlobExtensionOutput): Map<String, Any> = buildMap {
+        lb.supported?.let { put("supported", it) }
+        if (lb.blob != null && lb.originalSize != null) {
+            put("blob", lb.blob)
+            put("originalSize", lb.originalSize)
+        }
+        lb.written?.let { put("written", it) }
     }
 
     /**
@@ -350,8 +440,17 @@ object CtapCodec {
                     2L to response.authData,
                     3L to response.attStmt
                 )
-                // Populate unsignedExtensionOutputs (key 6) when PRF output is present per CTAP 2.3 §6.1
-                response.prf?.let { map[6L] = mapOf("prf" to encodePrfExtensionOutput(it)) }
+                // Aggregate unsignedExtensionOutputs (key 6) across prf and largeBlob per CTAP 2.3 §6.1 & §12.4
+                val unsignedExt = buildMap<String, Any> {
+                    response.prf?.let { put("prf", encodePrfExtensionOutput(it)) }
+                    response.largeBlob?.let {
+                        val encoded = encodeLargeBlobExtensionOutput(it)
+                        if (encoded.isNotEmpty()) put("largeBlob", encoded)
+                    }
+                }
+                if (unsignedExt.isNotEmpty()) {
+                    map[6L] = unsignedExt
+                }
                 byteArrayOf(CtapStatus.SUCCESS) + SimpleCbor.write(map)
             }
             is Ctap2Response.GetAssertionResponse -> {
@@ -366,9 +465,18 @@ object CtapCodec {
                 if (response.userSelected) {
                     map[6L] = true
                 }
-                // Populate unsignedExtensionOutputs (key 8) when PRF output is present per CTAP 2.3 §6.2
+                // Aggregate unsignedExtensionOutputs (key 8) across prf and largeBlob per CTAP 2.3 §6.2 & §12.4
                 // (key 7 is reserved for largeBlobKey byte string)
-                response.prf?.let { map[8L] = mapOf("prf" to encodePrfExtensionOutput(it)) }
+                val unsignedExt = buildMap<String, Any> {
+                    response.prf?.let { put("prf", encodePrfExtensionOutput(it)) }
+                    response.largeBlob?.let {
+                        val encoded = encodeLargeBlobExtensionOutput(it)
+                        if (encoded.isNotEmpty()) put("largeBlob", encoded)
+                    }
+                }
+                if (unsignedExt.isNotEmpty()) {
+                    map[8L] = unsignedExt
+                }
                 byteArrayOf(CtapStatus.SUCCESS) + SimpleCbor.write(map)
             }
         }

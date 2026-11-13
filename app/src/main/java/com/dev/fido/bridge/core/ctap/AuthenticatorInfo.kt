@@ -15,8 +15,8 @@ object AuthenticatorInfo {
             // Advertise FIDO_2_0 and FIDO_2_1 with built-in UV (uv = true, alwaysUv = true) and no pinUvAuthProtocols
             // so CTAP 2.1+ platforms delegate user verification directly to Android CredentialManager per CTAP 2.3 §6.1.1
             versions = listOf("FIDO_2_0", "FIDO_2_1"),
-            // Advertise WebAuthn PRF extension support so hybrid clients send pre-hashed "prf" dictionaries over the Noise tunnel
-            extensions = listOf("prf"),
+            // Advertise WebAuthn PRF and inline largeBlob extensions per CTAP 2.3 §12.4 over hybrid transport
+            extensions = listOf("prf", "largeBlob"),
             aaguid = ByteArray(16),
             options = mapOf(
                 "plat" to false,
@@ -26,7 +26,8 @@ object AuthenticatorInfo {
                 "up" to true,
                 "alwaysUv" to true
             ),
-            maxMsgSize = 2048,
+            // Provide 4096-byte message buffer budget so clients can inline 1KB-2KB compressed largeBlob writes
+            maxMsgSize = 4096,
             pinUvAuthProtocols = emptyList(),
             algorithms = ADVERTISED_COSE_ALGORITHMS.map { alg ->
                 mapOf("type" to "public-key", "alg" to alg)
