@@ -20,6 +20,14 @@ import org.json.JSONObject
 object CtapMapper {
 
     fun toWebAuthnGetCredentialJson(req: Ctap2Request.GetAssertion): String {
+        // Validate CTAP 2.3 §12.4 DEFLATE payload integrity upfront before invoking Android CredentialManager UI
+        req.largeBlob?.let { lb ->
+            if (lb.write != null && lb.originalSize != null) {
+                CryptoUtils.inflateRaw(lb.write, lb.originalSize)
+                    ?: throw CtapCodecException(CtapStatus.ERR_INVALID_CBOR, "Failed to inflate largeBlob.write payload")
+            }
+        }
+
         return JSONObject().apply {
             // Set challenge to Base64URL-encoded clientDataHash required by Android CredentialManager WebAuthn API
             put("challenge", CryptoUtils.encodeBase64UrlNoPadding(req.clientDataHash))
@@ -30,35 +38,23 @@ object CtapMapper {
             req.allowList?.takeIf { it.isNotEmpty() }?.let { list ->
                 put("allowCredentials", list.toJsonArray())
             }
-
-            val extensionsObj = JSONObject()
+            // Forward only "prf" to Android CredentialManager; forwarding "largeBlob" in requestJson
+            // causes third-party Android credential providers (e.g., Bitwarden) to fail JSON parsing.
             req.prf?.takeIf { it.hasEvaluationInputs() }?.let { prf ->
-                extensionsObj.put("prf", prf.toJsonObject())
-            }
-            req.largeBlob?.let { lb ->
-                when {
-                    lb.read == true -> extensionsObj.put("largeBlob", JSONObject().put("read", true))
-                    lb.write != null && lb.originalSize != null -> {
-                        // Decompress CTAP 2.3 §12.4 DEFLATE payload before forwarding raw bytes to Android CredentialManager,
-                        // and forward write only when allowList is non-empty per CTAP 2.3 §12.4 Step 4.2.
-                        val rawBytes = CryptoUtils.inflateRaw(lb.write, lb.originalSize)
-                            ?: throw CtapCodecException(CtapStatus.ERR_INVALID_CBOR, "Failed to inflate largeBlob.write payload")
-                        if (!req.allowList.isNullOrEmpty()) {
-                            extensionsObj.put(
-                                "largeBlob",
-                                JSONObject().put("write", CryptoUtils.encodeBase64UrlNoPadding(rawBytes))
-                            )
-                        }
-                    }
-                }
-            }
-            if (extensionsObj.length() > 0) {
-                put("extensions", extensionsObj)
+                put("extensions", JSONObject().put("prf", prf.toJsonObject()))
             }
         }.toString()
     }
 
     fun toWebAuthnCreateCredentialJson(req: Ctap2Request.MakeCredential): String {
+        // Reject required largeBlob support upfront per CTAP 2.3 §12.4 Step 3.1 before invoking Android CredentialManager UI
+        if (req.largeBlob?.support == "required") {
+            throw CtapCodecException(
+                CtapStatus.ERR_LARGE_BLOB_STORAGE_FULL,
+                "Android CredentialManager providers do not support required largeBlob storage"
+            )
+        }
+
         return JSONObject().apply {
             // Set challenge to Base64URL-encoded clientDataHash required by Android CredentialManager WebAuthn API
             put("challenge", CryptoUtils.encodeBase64UrlNoPadding(req.clientDataHash))
@@ -90,20 +86,13 @@ object CtapMapper {
             // attestation statements (fmt, attStmt) and AAGUID are preserved over CTAP2; the client
             // platform remains responsible for applying the RP's attestation conveyance preference.
             put("attestation", "direct")
-
-            val extensionsObj = JSONObject()
             // Forward "prf" during MakeCredential only when immediate evaluation salts are present;
             // Windows 11 unconditionally sends an empty {"prf": {}} whenever GetInfo advertises "prf",
             // which otherwise causes hardware-key providers to emit a signed {"hmac-secret": true}
             // extension in authData that Chromium rejects when the RP did not request PRF.
+            // Omit "largeBlob" from Android CredentialManager JSON to prevent Bitwarden parser errors.
             req.prf?.takeIf { it.hasEvaluationInputs() }?.let { prf ->
-                extensionsObj.put("prf", prf.toJsonObject())
-            }
-            req.largeBlob?.support?.let { support ->
-                extensionsObj.put("largeBlob", JSONObject().put("support", support))
-            }
-            if (extensionsObj.length() > 0) {
-                put("extensions", extensionsObj)
+                put("extensions", JSONObject().put("prf", prf.toJsonObject()))
             }
         }.toString()
     }
