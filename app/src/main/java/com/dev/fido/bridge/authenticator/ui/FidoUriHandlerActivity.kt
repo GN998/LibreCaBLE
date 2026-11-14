@@ -6,9 +6,7 @@ import android.bluetooth.BluetoothManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.graphics.Color
 import android.graphics.Typeface
-import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.text.InputFilter
 import android.text.InputType
@@ -34,6 +32,12 @@ import com.dev.fido.bridge.authenticator.session.BridgeSessionController
 import com.dev.fido.bridge.authenticator.transport.TransportManager
 import com.dev.fido.bridge.authenticator.transport.ble.HybridBleAdvertiser
 import com.dev.fido.bridge.core.security.TunnelConfigManager
+import com.dev.fido.bridge.core.ui.BridgeUiTheme
+import com.dev.fido.bridge.core.ui.BridgeUiTheme.createBottomSheetBackground
+import com.dev.fido.bridge.core.ui.BridgeUiTheme.createCardBackground
+import com.dev.fido.bridge.core.ui.BridgeUiTheme.createSheetStatusTextView
+import com.dev.fido.bridge.core.ui.BridgeUiTheme.createSheetTitleTextView
+import com.dev.fido.bridge.core.ui.BridgeUiTheme.dp
 
 class FidoUriHandlerActivity : AppCompatActivity() {
 
@@ -50,9 +54,6 @@ class FidoUriHandlerActivity : AppCompatActivity() {
     private var activeFidoUri: String? = null
     private var isQrScanMode: Boolean = false
 
-    private val Int.dp: Int
-        get() = (this * resources.displayMetrics.density).toInt()
-
     private val bluetoothAdapter: BluetoothAdapter?
         get() = (getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager)?.adapter
 
@@ -63,54 +64,40 @@ class FidoUriHandlerActivity : AppCompatActivity() {
             text = "Ready"
             textSize = 14f
             typeface = Typeface.MONOSPACE
-            setTextColor(Color.parseColor("#E2E8F0"))
+            setTextColor(BridgeUiTheme.COLOR_TEXT_TERMINAL)
             gravity = Gravity.START or Gravity.TOP
-            setLineSpacing(6.dp.toFloat(), 1.1f)
-            val padCard = 20.dp
+            setLineSpacing(dp(6).toFloat(), 1.1f)
+            val padCard = dp(20)
             setPadding(padCard, padCard, padCard, padCard)
-            val r = 14.dp.toFloat()
+            val r = dp(14).toFloat()
             background = createCardBackground(FloatArray(8) { r })
         }
 
         scrollContainer = ScrollView(this).apply {
             clipToPadding = false
-            setBackgroundColor(Color.parseColor("#020617"))
+            setBackgroundColor(BridgeUiTheme.COLOR_TERMINAL_BG)
             addView(tv, FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.WRAP_CONTENT
             ))
         }
 
-        scanTitleView = TextView(this).apply {
-            text = "Passkey"
-            textSize = 16f
-            typeface = Typeface.DEFAULT_BOLD
-            setTextColor(Color.parseColor("#F8FAFC"))
-            gravity = Gravity.CENTER
-        }
+        scanTitleView = createSheetTitleTextView()
+        scanStatusView = createSheetStatusTextView("Connecting...")
 
-        scanStatusView = TextView(this).apply {
-            text = "Connecting..."
-            textSize = 13f
-            typeface = Typeface.MONOSPACE
-            setTextColor(Color.parseColor("#94A3B8"))
-            gravity = Gravity.CENTER
-        }
-
-        val rSheet = 24.dp.toFloat()
         scanSheetCard = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
-            val pad = 24.dp
+            val pad = dp(24)
             setPadding(pad, pad, pad, pad)
-            background = createCardBackground(floatArrayOf(rSheet, rSheet, rSheet, rSheet, 0f, 0f, 0f, 0f))
+            background = createBottomSheetBackground()
             // Consume clicks inside the bottom sheet card so tapping it does not trigger scrim dismissal
             setOnClickListener { }
 
             addView(scanTitleView, LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply { bottomMargin = 12.dp })
+            ).apply { bottomMargin = dp(12) })
 
             addView(scanStatusView, LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
@@ -134,7 +121,8 @@ class FidoUriHandlerActivity : AppCompatActivity() {
             val insets = windowInsets.getInsets(
                 WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout()
             )
-            val pad = 16.dp
+            val pad = dp(16)
+            val sheetPad = dp(24)
             scrollContainer.setPadding(
                 insets.left + pad,
                 insets.top + pad,
@@ -142,10 +130,10 @@ class FidoUriHandlerActivity : AppCompatActivity() {
                 insets.bottom + pad
             )
             scanSheetCard.setPadding(
-                24.dp + insets.left,
-                24.dp,
-                24.dp + insets.right,
-                24.dp + insets.bottom
+                sheetPad + insets.left,
+                sheetPad,
+                sheetPad + insets.right,
+                sheetPad + insets.bottom
             )
             windowInsets
         }
@@ -180,7 +168,7 @@ class FidoUriHandlerActivity : AppCompatActivity() {
             scrollContainer.visibility = View.GONE
             scanSheetCard.visibility = View.VISIBLE
 
-            rootFrame.setBackgroundColor(Color.parseColor("#88000000"))
+            rootFrame.setBackgroundColor(BridgeUiTheme.COLOR_SCRIM)
             // Remove the transient QR task from Recents on scrim dismissal to prevent system re-creation with stale FIDO URIs
             rootFrame.setOnClickListener { finishAndRemoveTask() }
         } else {
@@ -190,17 +178,11 @@ class FidoUriHandlerActivity : AppCompatActivity() {
             scanSheetCard.visibility = View.GONE
             scrollContainer.visibility = View.VISIBLE
 
-            rootFrame.setBackgroundColor(Color.parseColor("#020617"))
+            rootFrame.setBackgroundColor(BridgeUiTheme.COLOR_TERMINAL_BG)
             rootFrame.setOnClickListener(null)
             rootFrame.isClickable = false
         }
         ViewCompat.requestApplyInsets(rootFrame)
-    }
-
-    private fun createCardBackground(radii: FloatArray) = GradientDrawable().apply {
-        setColor(Color.parseColor("#0F172A"))
-        cornerRadii = radii
-        setStroke(1.dp.coerceAtLeast(1), getColor(android.R.color.system_accent1_400) and 0x55FFFFFF)
     }
 
     /**
@@ -245,7 +227,7 @@ class FidoUriHandlerActivity : AppCompatActivity() {
         val statusView = TextView(this).apply {
             text = if (customId != null) "Custom configuration active" else "Currently using default configuration"
             textSize = 14f
-            setPadding(0, 0, 0, 8.dp)
+            setPadding(0, 0, 0, dp(8))
         }
         val inputField = EditText(this).apply {
             inputType = InputType.TYPE_CLASS_NUMBER
@@ -258,7 +240,8 @@ class FidoUriHandlerActivity : AppCompatActivity() {
         }
         val container = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(24.dp, 16.dp, 24.dp, 4.dp)
+            val hPad = dp(24)
+            setPadding(hPad, dp(16), hPad, dp(4))
             addView(statusView)
             addView(inputField)
         }

@@ -51,6 +51,11 @@ import com.dev.fido.bridge.core.ctap.model.Ctap2Request
 import com.dev.fido.bridge.core.ctap.model.Ctap2Response
 import com.dev.fido.bridge.core.ctap.model.CtapStatus
 import com.dev.fido.bridge.core.session.BridgeForegroundService
+import com.dev.fido.bridge.core.ui.BridgeUiTheme
+import com.dev.fido.bridge.core.ui.BridgeUiTheme.createBottomSheetBackground
+import com.dev.fido.bridge.core.ui.BridgeUiTheme.createSheetStatusTextView
+import com.dev.fido.bridge.core.ui.BridgeUiTheme.createSheetTitleTextView
+import com.dev.fido.bridge.core.ui.BridgeUiTheme.dp
 
 /**
  * Translucent bottom-sheet Activity invoked by Android CredentialManager when the user selects
@@ -69,9 +74,6 @@ class ClientQrPromptActivity : AppCompatActivity() {
 
     private var isCreateMode = false
     private val PERMISSION_REQ_CODE = 2001
-
-    private val Int.dp: Int
-        get() = (this * resources.displayMetrics.density).toInt()
 
     private val bluetoothAdapter: BluetoothAdapter?
         get() = (getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager)?.adapter
@@ -103,22 +105,16 @@ class ClientQrPromptActivity : AppCompatActivity() {
     }
 
     private fun buildBottomSheetUi() {
-        titleView = TextView(this).apply {
-            text = "Passkey"
-            textSize = 16f
-            typeface = Typeface.DEFAULT_BOLD
-            setTextColor(Color.parseColor("#F8FAFC"))
-            gravity = Gravity.CENTER
-        }
+        titleView = createSheetTitleTextView()
 
-        val qrSize = 230.dp
-        val qrPadding = 12.dp
+        val qrSize = dp(230)
+        val qrPadding = dp(12)
         qrImageView = ImageView(this).apply {
             scaleType = ImageView.ScaleType.FIT_CENTER
             setPadding(qrPadding, qrPadding, qrPadding, qrPadding)
             background = GradientDrawable().apply {
                 setColor(Color.WHITE)
-                cornerRadius = 16.dp.toFloat()
+                cornerRadius = dp(16).toFloat()
             }
             visibility = View.INVISIBLE
         }
@@ -131,7 +127,7 @@ class ClientQrPromptActivity : AppCompatActivity() {
             gravity = Gravity.CENTER
             background = GradientDrawable().apply {
                 shape = GradientDrawable.OVAL
-                setColor(Color.parseColor("#10B981"))
+                setColor(BridgeUiTheme.COLOR_BADGE_SUCCESS)
             }
             visibility = View.GONE
         }
@@ -139,37 +135,27 @@ class ClientQrPromptActivity : AppCompatActivity() {
         // Overlay the connected checkmark badge on the QR frame so the bottom sheet height stays fixed upon connection
         val qrContainer = FrameLayout(this).apply {
             addView(qrImageView, FrameLayout.LayoutParams(qrSize, qrSize, Gravity.CENTER))
-            val badgeSize = 96.dp
+            val badgeSize = dp(96)
             addView(connectedCheckView, FrameLayout.LayoutParams(badgeSize, badgeSize, Gravity.CENTER))
         }
 
-        statusView = TextView(this).apply {
-            text = "Preparing..."
-            textSize = 13f
-            typeface = Typeface.MONOSPACE
-            setTextColor(Color.parseColor("#94A3B8"))
-            gravity = Gravity.CENTER
-            setPadding(0, 16.dp, 0, 0)
+        statusView = createSheetStatusTextView("Preparing...").apply {
+            setPadding(0, dp(16), 0, 0)
         }
 
-        val r = 24.dp.toFloat()
         val cardContainer = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
-            val pad = 24.dp
+            val pad = dp(24)
             setPadding(pad, pad, pad, pad)
-            background = GradientDrawable().apply {
-                setColor(Color.parseColor("#0F172A"))
-                cornerRadii = floatArrayOf(r, r, r, r, 0f, 0f, 0f, 0f)
-                setStroke(1.dp.coerceAtLeast(1), getColor(android.R.color.system_accent1_400) and 0x55FFFFFF)
-            }
+            background = createBottomSheetBackground()
             // Consume clicks on the card so tapping inside does not trigger scrim cancellation
             setOnClickListener { }
 
             addView(titleView, LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply { bottomMargin = 20.dp })
+            ).apply { bottomMargin = dp(20) })
 
             addView(qrContainer, LinearLayout.LayoutParams(qrSize, qrSize))
 
@@ -180,7 +166,7 @@ class ClientQrPromptActivity : AppCompatActivity() {
         }
 
         rootScrim = FrameLayout(this).apply {
-            setBackgroundColor(Color.parseColor("#88000000"))
+            setBackgroundColor(BridgeUiTheme.COLOR_SCRIM)
             setOnClickListener { cancelCeremony() }
             addView(cardContainer, FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
@@ -193,7 +179,13 @@ class ClientQrPromptActivity : AppCompatActivity() {
             val insets = windowInsets.getInsets(
                 WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout()
             )
-            cardContainer.setPadding(24.dp + insets.left, 24.dp, 24.dp + insets.right, 24.dp + insets.bottom)
+            val sheetPad = dp(24)
+            cardContainer.setPadding(
+                sheetPad + insets.left,
+                sheetPad,
+                sheetPad + insets.right,
+                sheetPad + insets.bottom
+            )
             windowInsets
         }
 
@@ -274,7 +266,7 @@ class ClientQrPromptActivity : AppCompatActivity() {
         startForegroundService(serviceIntent)
 
         // Render the QR matrix off the main thread so window transition and BLE startup are never blocked
-        val qrSizePx = 230.dp
+        val qrSizePx = dp(230)
         Thread {
             val qrBitmap = QrBitmapRenderer.render(qrSession.fidoUri, qrSizePx)
             runOnUiThread {
