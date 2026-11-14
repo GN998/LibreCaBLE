@@ -5,12 +5,13 @@ import com.dev.fido.bridge.core.security.TunnelConfigManager
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
-// Parser object for handling FIDO caBLE v2 (CTAP 2.3) URI and QR code data parsing
+// Parse FIDO caBLE v2 (CTAP 2.3 / PXP v1.0) URI and QR code payloads
 object HybridQrParser {
 
-    private val PADDING_TABLE = intArrayOf(0, 3, 5, 8, 10, 13, 15)
+    // Map remaining byte count (0..6) to required base-10 digit count per PXP v1.0 §5.1
+    private val PARTIAL_CHUNK_DIGITS = intArrayOf(0, 3, 5, 8, 10, 13, 15)
 
-    // Parses a FIDO URI string (FIDO:/...) into a HybridQrData instance
+    // Parse a FIDO URI string (FIDO:/...) into a HybridQrData instance
     fun parse(uriString: String): HybridQrData? {
         try {
             val prefix = "fido:/"
@@ -19,7 +20,7 @@ object HybridQrParser {
             }
 
             val encoded = uriString.substring(prefix.length)
-            val cborBytes = decodeGmsBase34(encoded) ?: return null
+            val cborBytes = decodeDigitPayload(encoded) ?: return null
 
             val cborMap = CtapCodec.SimpleCbor.read(cborBytes) as? Map<*, *> ?: return null
 
@@ -61,13 +62,13 @@ object HybridQrParser {
         }
     }
 
-    // Decodes GMS Base34 (17-digit decimal groups) encoded string into CBOR byte array
-    private fun decodeGmsBase34(encoded: String): ByteArray? {
+    // Decode 17-digit base-10 chunks into little-endian 7-byte CBOR blocks per PXP v1.0 §5.1
+    private fun decodeDigitPayload(encoded: String): ByteArray? {
         val length = encoded.length
         val fullBlocks = length / 17
         val remainder = length % 17
 
-        val remainingBytes = PADDING_TABLE.indexOfFirst { remainder == it }
+        val remainingBytes = PARTIAL_CHUNK_DIGITS.indexOfFirst { remainder == it }
         if (remainingBytes == -1) return null
 
         val totalBytes = fullBlocks * 7 + remainingBytes
