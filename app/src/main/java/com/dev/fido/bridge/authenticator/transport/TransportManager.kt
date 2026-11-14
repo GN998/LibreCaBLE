@@ -84,17 +84,16 @@ class TransportManager(
         // prior to opening the channel to prevent race conditions with onConnected and avoid socket leaks.
         transportScope.launch {
             // Instantiate a dedicated NoiseSession and busy guard per transport session to prevent cross-session state races
-            val sessionNoise = NoiseSession()
-            val isProcessingCtap = AtomicBoolean(false)
-            try {
+            val sessionNoise = try {
                 val uncompressedPeerKey = CryptoHelper.decompressECKey(peerPublicKey)
-                sessionNoise.prepareSession(uncompressedPeerKey)
+                NoiseSession(uncompressedPeerKey)
             } catch (e: Exception) {
                 Log.e("TransportManager", "Invalid peer public key", e)
                 onStatusUpdate?.invoke("Error: ${e.message}")
                 onSessionTerminated?.invoke()
                 return@launch
             }
+            val isProcessingCtap = AtomicBoolean(false)
 
             // Pre-derive the 64-byte EID key before connecting so BLE advertising can start immediately
             val eidKey = CryptoHelper.endif(

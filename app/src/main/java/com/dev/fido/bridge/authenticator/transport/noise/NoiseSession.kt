@@ -6,27 +6,23 @@ import com.dev.fido.bridge.core.transport.noise.NoiseCrypter
 import com.dev.fido.bridge.core.transport.noise.NoiseHandshakeState
 import java.security.interfaces.ECPrivateKey
 
-class NoiseSession {
+/**
+ * Noise KNpsk0 responder state machine for QR-initiated authenticator transactions per CTAP 2.3 §11.5.1.2 / PXP §6.2.
+ * Pre-generates the local ephemeral P-256 keypair upon instantiation so transport callbacks remain free of key-generation latency.
+ */
+class NoiseSession(
+    private val peerPublicKeyBytes: ByteArray
+) {
     @Volatile
     var isHandshakeComplete = false
         private set
 
     private var noiseState: NoiseHandshakeState? = null
     private var crypter: NoiseCrypter? = null
-    private lateinit var peerPublicKeyBytes: ByteArray
-    private lateinit var ephPriv: ECPrivateKey
-    private lateinit var phoneEphemeralPubKey: ByteArray
+    private val ephPriv: ECPrivateKey
+    private val phoneEphemeralPubKey: ByteArray
 
-    /**
-     * Set the PC's static public key and pre-generate the local ephemeral P-256 keypair
-     * before awaiting the WebSocket handshake so onConnected remains free of key-generation latency.
-     */
-    @Synchronized
-    fun prepareSession(keyBytes: ByteArray) {
-        this.peerPublicKeyBytes = keyBytes
-        isHandshakeComplete = false
-        crypter = null
-
+    init {
         val (pub, priv) = CryptoHelper.generateEcKeyPair()
         ephPriv = priv
         phoneEphemeralPubKey = CryptoHelper.uncompressECKey(pub)
@@ -35,9 +31,7 @@ class NoiseSession {
     // Step 1: Initialize the noise state machine with derived PSK
     @Synchronized
     fun initializeHandshake(psk: ByteArray) {
-        check(::peerPublicKeyBytes.isInitialized) { "Session not prepared" }
-        // Reset handshake flag and session crypter so subsequent QR scans on a singleTop Activity
-        // process the new ClientHello instead of treating it as post-handshake ciphertext.
+        // Reset handshake flag and session crypter so fallback channels never reuse stale transport state
         isHandshakeComplete = false
         crypter = null
 
@@ -54,7 +48,6 @@ class NoiseSession {
     // Step 2: Process the incoming ClientHello and generate ServerHello
     @Synchronized
     fun processClientHelloAndGenerateServerHello(clientHello: ByteArray): ByteArray {
-        // Verify noiseState initialization, which inherently guarantees peerPublicKeyBytes and ephemeral keys are initialized
         val nh = checkNotNull(noiseState) { "Handshake not initialized" }
 
         if (clientHello.size < 81) {
