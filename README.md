@@ -23,8 +23,7 @@ LibreCaBLE is a lightweight, GMS-free FIDO2 hybrid transport (caBLE v2 / CTAP 2.
 Licensed under the [GNU General Public License v3.0 (GPLv3)](LICENSE).
 
 * **[microG GmsCore](https://github.com/microg/GmsCore/)**: Protocol logic inspired by microG GmsCore ([Apache 2.0](https://github.com/microg/GmsCore/blob/master/LICENSE)).
-* **[FIDO Alliance](https://fidoalliance.org/)**: CTAP and WebAuthn specifications.
-* **[Bitwarden](https://github.com/bitwarden/android)**: Open-source Android `CredentialManager` and local trust integration.
-* **[Cloudflare](https://www.cloudflare.com/)**: WebSocket tunnel relay infrastructure. 
-
+* **[FIDO Alliance](https://fidoalliance.org/) & [W3C](https://www.w3.org/TR/webauthn-3/)**: CTAP 2.3, PXP, and WebAuthn specifications and reference implementations.
+* **[Bitwarden](https://github.com/bitwarden/android) & [Authnkey](https://github.com/mimi89999/Authnkey)**: Open-source Android `CredentialManager` providers and `privileged_apps.json` allowlist integration.
+* **[Cloudflare](https://www.cloudflare.com/)**: WebSocket tunnel relay infrastructure.
 * GitHub & LinuxDo
