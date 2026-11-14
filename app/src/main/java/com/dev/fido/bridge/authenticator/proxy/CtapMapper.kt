@@ -66,11 +66,9 @@ object CtapMapper {
             // attestation statements (fmt, attStmt) and AAGUID are preserved over CTAP2; the client
             // platform remains responsible for applying the RP's attestation conveyance preference.
             put("attestation", "direct")
-            // Forward "prf" during MakeCredential only when immediate evaluation salts are present;
-            // Windows 11 unconditionally sends an empty {"prf": {}} whenever GetInfo advertises "prf",
-            // which otherwise causes hardware-key providers to emit a signed {"hmac-secret": true}
-            // extension in authData that Chromium rejects when the RP did not request PRF.
-            req.prf?.takeIf { it.hasEvaluationInputs() }?.let { prf ->
+            // Forward "prf" extension (including empty {"prf": {}} registration requests) so underlying
+            // credential providers and hardware keys initialize hmac-secret per WebAuthn Level 3 §10.1.4.
+            req.prf?.let { prf ->
                 put("extensions", JSONObject().put("prf", prf.toJsonObject()))
             }
         }.toString()
@@ -80,8 +78,8 @@ object CtapMapper {
         eval != null || !evalByCredential.isNullOrEmpty()
 
     /**
-     * Serialize pre-hashed CTAP2 PRF inputs into WebAuthn JSON with "prfAlreadyHashed": true
-     * so downstream Android credential providers do not double-hash the 32-byte salts.
+     * Serialize CTAP2 PRF inputs into WebAuthn JSON, attaching "prfAlreadyHashed": true
+     * when pre-hashed 32-byte evaluation salts are present so providers do not double-hash them.
      */
     private fun PrfExtensionInput.toJsonObject(): JSONObject = JSONObject().apply {
         eval?.let { put("eval", it.toJsonObject()) }
@@ -90,7 +88,9 @@ object CtapMapper {
                 map.forEach { (credIdB64, vals) -> put(credIdB64, vals.toJsonObject()) }
             })
         }
-        put("prfAlreadyHashed", true)
+        if (hasEvaluationInputs()) {
+            put("prfAlreadyHashed", true)
+        }
     }
 
     private fun PrfValues.toJsonObject(): JSONObject = JSONObject().apply {
@@ -182,14 +182,10 @@ object CtapMapper {
         val map = CtapCodec.SimpleCbor.read(attestationObjectBytes, strict = false) as? Map<*, *>
             ?: throw CtapCodecException(CtapStatus.ERR_INVALID_CBOR, "attestationObject must be a CBOR map")
 
-        // Report enabled=false when evaluation salts were forwarded to the provider but it returned no PRF output;
-        // report enabled=true only when an empty MakeCredential "prf" dictionary was withheld to keep hardware authData clean.
+        // Reflect the provider's actual PRF registration result, defaulting to enabled=false only if
+        // PRF was requested but the underlying provider did not report PRF support.
         val prfOutput = parsePrfOutputFromClientExtensionResults(rootObj, isRegistration = true)
-            ?: when {
-                prfInput == null -> null
-                prfInput.hasEvaluationInputs() -> PrfExtensionOutput(enabled = false)
-                else -> PrfExtensionOutput(enabled = true)
-            }
+            ?: if (prfInput != null) PrfExtensionOutput(enabled = false) else null
 
         return Ctap2Response.MakeCredentialResponse(
             fmt = map.requireField("fmt", "attestationObject.fmt"),
