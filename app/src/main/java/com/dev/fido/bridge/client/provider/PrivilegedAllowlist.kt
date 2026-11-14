@@ -37,12 +37,14 @@ object PrivilegedAllowlist {
             }.removeSuffix("/")
         }
 
-        val signerBytes = if (callingAppInfo.signingInfo.hasMultipleSigners()) {
-            callingAppInfo.signingInfo.apkContentsSigners.first().toByteArray()
+        // Fall back to apkContentsSigners when signingCertificateHistory is null or empty on ROMs without rotation lineage
+        val signingInfo = callingAppInfo.signingInfo
+        val signer = if (signingInfo.hasMultipleSigners()) {
+            signingInfo.apkContentsSigners.first()
         } else {
-            callingAppInfo.signingInfo.signingCertificateHistory.first().toByteArray()
+            signingInfo.signingCertificateHistory?.firstOrNull() ?: signingInfo.apkContentsSigners.first()
         }
-        val certHash = CryptoUtils.sha256(signerBytes)
+        val certHash = CryptoUtils.sha256(signer.toByteArray())
         return "android:apk-key-hash:${CryptoUtils.encodeBase64UrlNoPadding(certHash)}"
     }
 }
