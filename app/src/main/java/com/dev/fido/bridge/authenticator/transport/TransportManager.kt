@@ -96,7 +96,7 @@ class TransportManager(
             val isProcessingCtap = AtomicBoolean(false)
 
             // Pre-derive the 64-byte EID key before connecting so BLE advertising can start immediately
-            val eidKey = CryptoHelper.endif(
+            val eidKey = CryptoHelper.hkdf(
                 ikm = psk,
                 salt = ByteArray(0),
                 info = byteArrayOf(1, 0, 0, 0),
@@ -127,7 +127,7 @@ class TransportManager(
                 val finalEid = CryptoHelper.generateEid(eidKey, advertPlaintext)
 
                 // 3. Derive 32-byte Noise PSK and initialize KNpsk0 state machine before starting radio advertising
-                val noisePsk = CryptoHelper.endif(
+                val noisePsk = CryptoHelper.hkdf(
                     ikm = psk,
                     salt = advertPlaintext,
                     info = byteArrayOf(3, 0, 0, 0),
@@ -292,7 +292,7 @@ class TransportManager(
                     return
                 }
 
-                val ephemeralTunnelId = CryptoHelper.endif(
+                val ephemeralTunnelId = CryptoHelper.hkdf(
                     ikm = psk,
                     salt = ByteArray(0),
                     info = byteArrayOf(2, 0, 0, 0),

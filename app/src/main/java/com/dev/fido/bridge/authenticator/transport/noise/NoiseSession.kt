@@ -68,10 +68,10 @@ class NoiseSession(
         nh.mixHash(phoneEphemeralPubKey)
         nh.mixKey(phoneEphemeralPubKey)
 
-        val peDh = CryptoHelper.recd(ephPriv, pcEphemeralPubKey)
+        val peDh = CryptoHelper.ecdh(ephPriv, pcEphemeralPubKey)
         nh.mixKey(peDh)
 
-        val psDh = CryptoHelper.recd(ephPriv, peerPublicKeyBytes)
+        val psDh = CryptoHelper.ecdh(ephPriv, peerPublicKeyBytes)
         nh.mixKey(psDh)
 
         val serverHelloPayload = nh.encryptAndHash(ByteArray(0))

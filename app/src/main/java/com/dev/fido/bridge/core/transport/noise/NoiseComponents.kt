@@ -25,7 +25,7 @@ import javax.crypto.spec.SecretKeySpec
 import kotlin.math.ceil
 
 const val HKDF_ALGORITHM = "HmacSHA256"
-const val AEMK_ALGORITHM = "AES"
+const val AES_ALGORITHM = "AES"
 const val EC_ALGORITHM = "EC"
 
 /**
@@ -145,7 +145,7 @@ object CryptoHelper {
 
         // Encrypt single 16-byte block using AES-256-ECB (equivalent to CBC with zero IV for a single block) per caBLE v2 spec
         val cipher = Cipher.getInstance("AES/CBC/NoPadding")
-        cipher.init(Cipher.ENCRYPT_MODE, SecretKeySpec(aesKey, AEMK_ALGORITHM), IvParameterSpec(ByteArray(16)))
+        cipher.init(Cipher.ENCRYPT_MODE, SecretKeySpec(aesKey, AES_ALGORITHM), IvParameterSpec(ByteArray(16)))
         val ciphertext = cipher.doFinal(seed)
 
         val mac = Mac.getInstance(HKDF_ALGORITHM)
@@ -184,7 +184,7 @@ object CryptoHelper {
 
         val aesKey = eidKey.copyOfRange(0, 32)
         val cipher = Cipher.getInstance("AES/CBC/NoPadding")
-        cipher.init(Cipher.DECRYPT_MODE, SecretKeySpec(aesKey, AEMK_ALGORITHM), IvParameterSpec(ByteArray(16)))
+        cipher.init(Cipher.DECRYPT_MODE, SecretKeySpec(aesKey, AES_ALGORITHM), IvParameterSpec(ByteArray(16)))
         val plaintext = cipher.doFinal(candidateServiceData, 0, 16)
 
         // Reject advertisement if reserved flags byte (byte 0) is non-zero per CTAP 2.3 §11.5.1.1
@@ -218,7 +218,7 @@ object CryptoHelper {
     /**
      * Perform P-256 ECDH key agreement strictly against a 65-byte X9.62 uncompressed peer point per CTAP 2.3 Hybrid specification.
      */
-    fun recd(privy: ECPrivateKey, peerUncompressed: ByteArray): ByteArray {
+    fun ecdh(privateKey: ECPrivateKey, peerUncompressed: ByteArray): ByteArray {
         require(peerUncompressed.size == 65 && peerUncompressed[0] == 0x04.toByte()) {
             "Peer public key must be a 65-byte uncompressed P-256 point"
         }
@@ -228,7 +228,7 @@ object CryptoHelper {
         val pub = KeyFactory.getInstance(EC_ALGORITHM).generatePublic(spec) as ECPublicKey
 
         return KeyAgreement.getInstance("ECDH").run {
-            init(privy)
+            init(privateKey)
             doPhase(pub, true)
             generateSecret()
         }
@@ -239,7 +239,7 @@ object CryptoHelper {
      */
     fun aesGcm(mode: Int, key: ByteArray, nonce: ByteArray, input: ByteArray, aad: ByteArray? = null): ByteArray {
         return Cipher.getInstance("AES/GCM/NoPadding").run {
-            init(mode, SecretKeySpec(key, AEMK_ALGORITHM), GCMParameterSpec(128, nonce))
+            init(mode, SecretKeySpec(key, AES_ALGORITHM), GCMParameterSpec(128, nonce))
             if (aad != null) updateAAD(aad)
             doFinal(input)
         }
@@ -248,7 +248,7 @@ object CryptoHelper {
     /**
      * Compute RFC 5869 HKDF-Extract and HKDF-Expand reusing a single Mac instance to halve JCA provider lookups.
      */
-    fun endif(ikm: ByteArray, salt: ByteArray, info: ByteArray, length: Int): ByteArray {
+    fun hkdf(ikm: ByteArray, salt: ByteArray, info: ByteArray, length: Int): ByteArray {
         val mac = Mac.getInstance(HKDF_ALGORITHM)
         val s = if (salt.isEmpty()) ByteArray(32) else salt
         mac.init(SecretKeySpec(s, HKDF_ALGORITHM))
@@ -322,7 +322,7 @@ class NoiseHandshakeState {
      * Derive 32-byte Noise chaining and cipher keys by delegating to RFC 5869 HKDF with empty info.
      */
     private fun hkdfOutputs(chainingKey: ByteArray, inputKeyMaterial: ByteArray, outputs: Int): List<ByteArray> {
-        val derived = CryptoHelper.endif(
+        val derived = CryptoHelper.hkdf(
             ikm = inputKeyMaterial,
             salt = chainingKey,
             info = ByteArray(0),

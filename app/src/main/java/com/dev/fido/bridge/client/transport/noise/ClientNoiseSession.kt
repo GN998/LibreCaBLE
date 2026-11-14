@@ -69,11 +69,11 @@ class ClientNoiseSession(
         nh.mixKey(peerEphPubBytes)
 
         // Token 'ee': ECDH(initiator ephemeral priv, responder ephemeral pub)
-        val eeDh = CryptoHelper.recd(ephPriv, peerEphPubBytes)
+        val eeDh = CryptoHelper.ecdh(ephPriv, peerEphPubBytes)
         nh.mixKey(eeDh)
 
         // Token 'se': ECDH(initiator static identity priv, responder ephemeral pub)
-        val seDh = CryptoHelper.recd(identityPrivateKey, peerEphPubBytes)
+        val seDh = CryptoHelper.ecdh(identityPrivateKey, peerEphPubBytes)
         nh.mixKey(seDh)
 
         val plaintext = nh.decryptAndHash(ciphertext)

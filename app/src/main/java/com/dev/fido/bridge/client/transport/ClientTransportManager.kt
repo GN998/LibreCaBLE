@@ -68,13 +68,13 @@ class ClientTransportManager(
 
         // Offload HKDF key derivation and BLE binder registration from the UI thread
         transportScope.launch {
-            val eidKey = CryptoHelper.endif(
+            val eidKey = CryptoHelper.hkdf(
                 ikm = qrSession.qrSecret,
                 salt = ByteArray(0),
                 info = byteArrayOf(1, 0, 0, 0),
                 length = 64
             )
-            val tunnelId = CryptoHelper.endif(
+            val tunnelId = CryptoHelper.hkdf(
                 ikm = qrSession.qrSecret,
                 salt = ByteArray(0),
                 info = byteArrayOf(2, 0, 0, 0),
@@ -133,7 +133,7 @@ class ClientTransportManager(
         onStatusUpdate?.invoke("Connecting...")
 
         // Derive 32-byte Noise PSK (purpose = 3) using the decrypted 16-byte BLE advert plaintext as salt
-        val psk = CryptoHelper.endif(
+        val psk = CryptoHelper.hkdf(
             ikm = qrSession.qrSecret,
             salt = advert.plaintext,
             info = byteArrayOf(3, 0, 0, 0),
