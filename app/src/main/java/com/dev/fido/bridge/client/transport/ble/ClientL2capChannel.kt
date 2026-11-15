@@ -49,6 +49,10 @@ class ClientL2capChannel(
     @SuppressLint("MissingPermission")
     fun connect() {
         channelScope.launch {
+            // Wait 110ms after BLE stopScan() so Bluedroid finishes reconfiguring HCI scan parameters before LE Create Connection
+            delay(110)
+            if (isClientClosed) return@launch
+
             // Attempt a single L2CAP CoC connection so failure falls back to the WebSocket tunnel without retry delay
             val l2capSocket = try {
                 device.createInsecureL2capChannel(psm).also { socket = it }
