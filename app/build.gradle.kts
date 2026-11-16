@@ -48,9 +48,9 @@ android {
     defaultConfig {
         applicationId = "com.dev.fido.bridge"
         minSdk = 34
-        targetSdk = 35
-        versionCode = 15
-        versionName = "1.4.6"
+        targetSdk = 37
+        versionCode = 16
+        versionName = "1.5.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("int", "TUNNEL_ID", "$tunnelId")
@@ -90,7 +90,7 @@ kotlin {
 }
 
 dependencies {
-    implementation("androidx.core:core-ktx:1.16.0")
+    implementation("androidx.core:core:1.19.1")
     implementation("androidx.appcompat:appcompat:1.7.1")
 
     // Android 14+ CredentialManager (Core API)
