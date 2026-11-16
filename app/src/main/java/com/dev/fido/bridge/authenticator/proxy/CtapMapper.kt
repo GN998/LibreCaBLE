@@ -66,9 +66,10 @@ object CtapMapper {
             // attestation statements (fmt, attStmt) and AAGUID are preserved over CTAP2; the client
             // platform remains responsible for applying the RP's attestation conveyance preference.
             put("attestation", "direct")
-            // Forward "prf" extension (including empty {"prf": {}} registration requests) so underlying
-            // credential providers and hardware keys initialize hmac-secret per WebAuthn Level 3 §10.1.4.
-            req.prf?.let { prf ->
+            // Ignore bare {"prf": {}} probes without evaluation inputs sent by Windows 11 hybrid
+            // transport when the RP did not request PRF, preventing hardware keys (e.g. YubiKey)
+            // from signing unrequested {"hmac-secret": true} into authData and triggering NotAllowedError.
+            req.prf?.takeIf { it.hasEvaluationInputs() }?.let { prf ->
                 put("extensions", JSONObject().put("prf", prf.toJsonObject()))
             }
         }.toString()
@@ -182,10 +183,9 @@ object CtapMapper {
         val map = CtapCodec.SimpleCbor.read(attestationObjectBytes, strict = false) as? Map<*, *>
             ?: throw CtapCodecException(CtapStatus.ERR_INVALID_CBOR, "attestationObject must be a CBOR map")
 
-        // Reflect the provider's actual PRF registration result, defaulting to enabled=false only if
-        // PRF was requested but the underlying provider did not report PRF support.
+        // Omit unsignedExtensionOutputs["prf"] when the underlying provider does not return PRF output
+        // so GMS Ctap2RegisterResponseConverter does not serialize enabled=false as an invalid empty {"prf":{}} object that crashes Chromium Mojo parsing.
         val prfOutput = parsePrfOutputFromClientExtensionResults(rootObj, isRegistration = true)
-            ?: if (prfInput != null) PrfExtensionOutput(enabled = false) else null
 
         return Ctap2Response.MakeCredentialResponse(
             fmt = map.requireField("fmt", "attestationObject.fmt"),
