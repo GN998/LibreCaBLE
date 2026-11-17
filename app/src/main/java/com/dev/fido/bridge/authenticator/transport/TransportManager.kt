@@ -228,15 +228,21 @@ class TransportManager(
                                                     req is com.dev.fido.bridge.core.ctap.model.Ctap2Request.GetAssertion && !req.userPresence
                                                 }.getOrDefault(false)
 
-                                            if (!isSilentPreFlight && clearActiveSession(sourceChannel)) {
+                                            if (!isSilentPreFlight) {
                                                 val msg = if (statusByte == CtapStatus.SUCCESS) {
                                                     "Completed"
                                                 } else {
                                                     "Cancelled (0x${"%02X".format(statusByte)})"
                                                 }
                                                 onStatusUpdate?.invoke(msg)
-                                                sourceChannel.close()
-                                                onSessionTerminated?.invoke()
+                                                // Keep ForegroundService priority and activeChannel alive briefly so the async
+                                                // writer thread flushes the final frame or receives peer typeShutdown (0x00)
+                                                // before OEM power managers freeze the backgrounded process.
+                                                delay(360)
+                                                if (clearActiveSession(sourceChannel)) {
+                                                    sourceChannel.close()
+                                                    onSessionTerminated?.invoke()
+                                                }
                                             } else if (statusByte != CtapStatus.SUCCESS) {
                                                 onStatusUpdate?.invoke("Cancelled (0x${"%02X".format(statusByte)})")
                                             }
@@ -261,7 +267,10 @@ class TransportManager(
                                 Log.d("TransportManager", "Received Shutdown message (0x00), closing channel.")
                                 bleAdvertiser.stopAdvertising()
                                 if (clearActiveSession(sourceChannel)) {
-                                    onStatusUpdate?.invoke("Completed")
+                                    // Preserve any terminal status (e.g., Cancelled) already set by a finishing ceremony
+                                    if (!isProcessingCtap.get()) {
+                                        onStatusUpdate?.invoke("Completed")
+                                    }
                                     sourceChannel.close()
                                     onSessionTerminated?.invoke()
                                 }
