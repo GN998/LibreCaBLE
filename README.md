@@ -1,29 +1,37 @@
 # LibreCaBLE (Proof of Concept)
-![Vibe Coded](https://img.shields.io/badge/LLM-Vibe_Coded-orange) 
 
-LibreCaBLE is a lightweight, GMS-free FIDO2 hybrid transport (caBLE v2 / CTAP 2.3 §11.5) and Proximity Exchange Protocol (PXP) implementation for Android 14+ (API 34+). It enables an Android device to operate as both a Credential Manager Hosting Device (CMHD / Roaming Authenticator) and a Client Platform for QR-initiated cross-device WebAuthn ceremonies over BLE L2CAP and WebSocket relay tunnels.
+![Android 14+](https://img.shields.io/badge/Android-14%2B%20(API%2034%2B)-3DDC84?logo=android&logoColor=white)
+![License: GPLv3](https://img.shields.io/badge/License-GPLv3-blue.svg)
+![GMS-Free](https://img.shields.io/badge/GMS-Free-brightgreen)
+![Vibe Coded](https://img.shields.io/badge/LLM-Vibe_Coded-orange)
 
-## Core Features
+A lightweight, GMS-free FIDO2 hybrid transport (`caBLE v2` / CTAP 2.3 §11.5) and Proximity Exchange Protocol (PXP) bridge for Android 14+ (API 34+). It allows an Android device without Google Play Services to perform QR-initiated cross-device Passkey ceremonies as either an **Authenticator** (scanning another device's QR code) or a **Client Platform** (displaying a QR code for another device to scan).
 
-* **CMHD / Roaming Authenticator Mode**: Handles `FIDO:/` URIs for QR-initiated transactions (CTAP 2.3 §11.5.1), broadcasts `0xFFF9` BLE proximity advertisements, and dispatches CTAP2 commands (including pre-hashed `prf` inputs) to Android's `CredentialManager` with privileged `origin` and `clientDataHash` binding.
-* **Client Platform Mode**: Implements Android's `CredentialProviderService` to initiate hybrid ceremonies, rendering digit-encoded `FIDO:/` QR payloads, scanning for `0xFFF9` BLE advertisements, and assembling WebAuthn responses (`COSE_Key` to SPKI conversion, `credProps`, `prf`, and `privileged_apps.json` origin verification).
-* **CTAP 2.3 Hybrid Transport & Encoding**: Full `Noise_KNpsk0_P256_AESGCM_SHA256` handshakes, direct BLE L2CAP CoC channels with automatic WebSocket tunnel fallback (assigned ID `0` or hashed IDs `256–65535`), and a zero-dependency **CTAP2 canonical CBOR** codec supporting `authenticatorMakeCredential (0x01)`, `authenticatorGetAssertion (0x02)`, `authenticatorGetInfo (0x04)`, and `authenticatorSelection (0x0B)`.
+## Features
 
-## Requirements
+* **Authenticator Mode (Scan QR)**: Handles `FIDO:/` URIs via `VIEW` intents, advertises `0xFFF9` BLE proximity EIDs, and forwards CTAP2 requests to Android's `CredentialManager` with privileged `origin` and `clientDataHash` binding.
+* **Client Platform Mode (Display QR)**: Implements `CredentialProviderService` to generate digit-encoded `FIDO:/` QR codes, scan `0xFFF9` BLE advertisements, verify browser origins against `privileged_apps.json`, and assemble WebAuthn responses (`COSE_Key` to SPKI, `credProps`, and `prf`).
+* **Transport & Protocol**:
+  * **Dual Transport**: Direct BLE L2CAP Connection-oriented Channels (CoC) over BLE 5.0 Extended Advertising, with automatic fallback to WebSocket relay tunnels (assigned domain `0` or hashed IDs `256–65535`).
+  * **Cryptography & Codec**: `Noise_KNpsk0_P256_AESGCM_SHA256` handshakes, zero-dependency CTAP2 canonical CBOR codec (`MakeCredential`, `GetAssertion`, `GetInfo`, `Selection`), and WebAuthn `prf` extension support.
 
-1. **Android 14+ (API 34+)** with Bluetooth enabled.
-2. **CMHD (Authenticator) Mode**:
-   * App signing certificate SHA-256 fingerprint must be allowlisted in or directly trusted by your local credential provider (e.g., Bitwarden) to permit `CREDENTIAL_MANAGER_SET_ORIGIN`.
-   * An external camera or QR scanner app that dispatches `VIEW` intents for `FIDO:/` URIs.
-   * *(Optional)* Custom tunnel domain ID can be configured via **⋮ > Extended Domain Settings** .
-3. **Client Platform Mode**: Enable **LibreCaBLE** in Android *Settings > Passwords & passkeys* (or via **⋮ > Enable Client Provider**).
+## Requirements & Usage
+
+1. **System**: Android 14+ (API 34+) with Bluetooth enabled. Grant Nearby Devices (Bluetooth) permissions when prompted.
+2. **Authenticator Mode (Scan a PC/Device QR Code)**:
+   * Your local `CredentialManager` provider (e.g., Bitwarden, Authnkey) must allowlist LibreCaBLE (`com.dev.fido.bridge`) and its signing certificate SHA-256 fingerprint to permit `CREDENTIAL_MANAGER_SET_ORIGIN`.
+   * Use a QR scanner app that dispatches `VIEW` intents for `FIDO:/` URIs (such as [Binary Eye]).
+   * *(Optional)* Configure a custom WebSocket tunnel domain ID (`0` or `256–65535`) via **⋮ > Extended Domain Settings**.
+3. **Client Platform Mode (Sign in on This Device)**:
+   * Enable **LibreCaBLE** in Android *Settings > Passwords & passkeys* (or via **⋮ > Enable Client Provider**).
+   * Select **Scan QR code (LibreCaBLE)** in the system Passkey prompt and scan it with your authenticator device.
 
 ## License & Acknowledgments
 
 Licensed under the [GNU General Public License v3.0 (GPLv3)](LICENSE).
 
 * **[microG GmsCore](https://github.com/microg/GmsCore/)**: Protocol logic inspired by microG GmsCore ([Apache 2.0](https://github.com/microg/GmsCore/blob/master/LICENSE)).
-* **[FIDO Alliance](https://fidoalliance.org/) & [W3C](https://www.w3.org/TR/webauthn-3/)**: CTAP 2.3, PXP, and WebAuthn specifications and reference implementations.
+* **[FIDO Alliance](https://fidoalliance.org/) & [W3C](https://www.w3.org/TR/webauthn-3/)**: CTAP 2.3, PXP, and WebAuthn specifications.
 * **[Bitwarden](https://github.com/bitwarden/android) & [Authnkey](https://github.com/mimi89999/Authnkey)**: Open-source Android `CredentialManager` providers and `privileged_apps.json` allowlist integration.
 * **[Cloudflare](https://www.cloudflare.com/)**: WebSocket tunnel relay infrastructure.
 * GitHub & LinuxDo
