@@ -391,6 +391,16 @@ class FidoUriHandlerActivity : AppCompatActivity() {
         }
     }
 
+    override fun onStop() {
+        super.onStop()
+        // Abort the in-flight session immediately when the user dismisses the finishing activity
+        // without re-stopping sessions that already completed via onSessionTerminated.
+        if (isFinishing && activeFidoUri != null) {
+            activeFidoUri = null
+            if (::sessionController.isInitialized) sessionController.stopSession()
+        }
+    }
+
     override fun onDestroy() {
         super.onDestroy()
         activeFidoUri = null
