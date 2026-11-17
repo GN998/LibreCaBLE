@@ -49,8 +49,8 @@ android {
         applicationId = "com.dev.fido.bridge"
         minSdk = 34
         targetSdk = 37
-        versionCode = 16
-        versionName = "1.5.0"
+        versionCode = 17
+        versionName = "1.5.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("int", "TUNNEL_ID", "$tunnelId")
