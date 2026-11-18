@@ -12,9 +12,10 @@ val localProperties = Properties().apply {
     }
 }
 
+// Fall back to default tunnel domain 0 (cable.ua5v.com) when no custom TUNNEL_ID is provided
 val rawTunnelId = System.getenv("CUSTOM_TUNNEL_ID")?.takeIf { it.isNotBlank() }
     ?: localProperties.getProperty("TUNNEL_ID")?.takeIf { it.isNotBlank() }
-    ?: throw GradleException("Build failed: TUNNEL_ID is not specified!")
+    ?: "0"
 
 val tunnelId = rawTunnelId.toIntOrNull()
     ?: throw GradleException("Build failed: TUNNEL_ID must be a valid integer.")
