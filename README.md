@@ -19,7 +19,7 @@ A lightweight, GMS-free FIDO2 hybrid transport (`caBLE v2` / CTAP 2.3 §11.5) an
 
 1. **System**: Android 14+ (API 34+) with Bluetooth enabled. Grant Nearby Devices (Bluetooth) permissions when prompted.
 2. **Authenticator Mode (Scan a PC/Device QR Code)**:
-   * Your local `CredentialManager` provider (e.g., Bitwarden, Authnkey) must allowlist LibreCaBLE (`com.dev.fido.bridge`) and its signing certificate SHA-256 fingerprint to permit `CREDENTIAL_MANAGER_SET_ORIGIN`.
+   * Your local `CredentialManager` provider (e.g., Bitwarden) must allowlist LibreCaBLE (`com.dev.fido.bridge`) and its signing certificate SHA-256 fingerprint to permit `CREDENTIAL_MANAGER_SET_ORIGIN`.
    * Use a QR scanner app that dispatches `VIEW` intents for `FIDO:/` URIs (such as [Binary Eye]).
    * *(Optional)* Configure a custom WebSocket tunnel domain ID (`0` or `256–65535`) via **⋮ > Extended Domain Settings**.
 3. **Client Platform Mode (Sign in on This Device)**:
@@ -32,6 +32,7 @@ Licensed under the [GNU General Public License v3.0 (GPLv3)](LICENSE).
 
 * **[microG GmsCore](https://github.com/microg/GmsCore/)**: Protocol logic inspired by microG GmsCore ([Apache 2.0](https://github.com/microg/GmsCore/blob/master/LICENSE)).
 * **[FIDO Alliance](https://fidoalliance.org/) & [W3C](https://www.w3.org/TR/webauthn-3/)**: CTAP 2.3, PXP, and WebAuthn specifications.
-* **[Bitwarden](https://github.com/bitwarden/android) & [Authnkey](https://github.com/mimi89999/Authnkey)**: Open-source Android `CredentialManager` providers and `privileged_apps.json` allowlist integration.
+* **[Bitwarden](https://github.com/bitwarden/android)**: Open-source Android `CredentialManager` provider with privileged allowlist support.
+* **[Authnkey](https://github.com/mimi89999/Authnkey)**: Referenced `privileged_apps.json` browser allowlist for Client Platform origin verification.
 * **[Cloudflare](https://www.cloudflare.com/)**: WebSocket tunnel relay infrastructure.
 * GitHub & LinuxDo

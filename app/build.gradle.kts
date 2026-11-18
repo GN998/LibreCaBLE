@@ -28,7 +28,7 @@ android {
     compileSdk = 37
 
     // Enforce deterministic APK signing certificate so external credential providers
-    // (e.g., Authnkey, Bitwarden) can reliably verify the app's SHA-256 fingerprint allowlist.
+    // can reliably verify the app's SHA-256 fingerprint against their privileged allowlist.
     signingConfigs {
         create("fixedConfig") {
             val keystoreFile = rootProject.file("my-release-key.jks")
