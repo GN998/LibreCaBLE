@@ -25,6 +25,14 @@ A lightweight, GMS-free FIDO2 hybrid transport (`caBLE v2` / CTAP 2.3 §11.5) an
 3. **Client Platform Mode (Sign in on This Device)**:
    * Enable **LibreCaBLE** in Android *Settings > Passwords & passkeys* (or via **⋮ > Enable Client Provider**).
    * Select **Scan QR code (LibreCaBLE)** in the system Passkey prompt and scan it with your authenticator device.
+4. **Tunnel Domain Recommendation** (**⋮ > Extended Domain Settings**):
+   * Try setting `0` (Google's official `cable.ua5v.com`) first.
+   * If unreachable, keep the default (tap **Delete** to restore) or specify a custom ID (`256–65535`).
+
+## Limitations (Not Implemented)
+
+* **`attestation: "enterprise"`**: Enterprise attestation (`ep`).
+* **`largeBlob`**: CTAP2 `largeBlobs` / `largeBlobKey` extension.
 
 ## License & Acknowledgments
 
@@ -36,3 +44,8 @@ Licensed under the [GNU General Public License v3.0 (GPLv3)](LICENSE).
 * **[Authnkey](https://github.com/mimi89999/Authnkey)**: Referenced `privileged_apps.json` browser allowlist for Client Platform origin verification.
 * **[Cloudflare](https://www.cloudflare.com/)**: WebSocket tunnel relay infrastructure.
 * GitHub & LinuxDo
+
+## Security & Build Provenance
+
+* **Trusted Releases**: Starting from `v1.5.2`, official APKs are built via GitHub Actions and locked via GitHub Immutable Releases.
+* **Disclaimer**: LibreCaBLE is an experimental Proof of Concept without formal security audits. It is **not affiliated with, endorsed by, or sponsored by** the FIDO Alliance, Google, Bitwarden, Authnkey, Cloudflare, or the microG Project.
