@@ -73,9 +73,7 @@ jobs:
           APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name "apksigner" | sort -V | tail -n 1)
           "$APKSIGNER" verify app/build/outputs/apk/release/app-release.apk
 
-          cd app/build/outputs/apk/release
-          mv app-release.apk "${APK_FILENAME}"
-          sha256sum "${APK_FILENAME}" > SHA256SUMS.txt
+          mv app/build/outputs/apk/release/app-release.apk "app/build/outputs/apk/release/${APK_FILENAME}"
 
       - name: Publish GitHub Release
         env:
@@ -86,11 +84,10 @@ jobs:
 
           # Reuse existing draft on workflow retry, or create a new draft release
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" "${APK_FILENAME}" SHA256SUMS.txt --clobber
+            gh release upload "$TAG" "${APK_FILENAME}" --clobber
           else
             gh release create "$TAG" \
               "${APK_FILENAME}" \
-              SHA256SUMS.txt \
               --draft \
               --verify-tag \
               --title "LibreCaBLE $TAG" \
