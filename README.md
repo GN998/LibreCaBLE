@@ -41,7 +41,7 @@ Licensed under the [GNU General Public License v3.0 (GPLv3)](LICENSE).
 * **[microG GmsCore](https://github.com/microg/GmsCore/)**: Protocol logic inspired by microG GmsCore ([Apache 2.0](https://github.com/microg/GmsCore/blob/master/LICENSE)).
 * **[FIDO Alliance](https://fidoalliance.org/) & [W3C](https://www.w3.org/TR/webauthn-3/)**: CTAP 2.3, PXP, and WebAuthn specifications.
 * **[Bitwarden](https://github.com/bitwarden/android)**: Open-source Android `CredentialManager` provider with privileged allowlist support.
-* **[Authnkey](https://github.com/mimi89999/Authnkey)**: Referenced `privileged_apps.json` browser allowlist for Client Platform origin verification.
+* **[Authnkey](https://github.com/mimi89999/Authnkey)**: Referenced `privileged_apps.json` browser allowlist for Client Platform origin verification ([MIT License](https://github.com/mimi89999/Authnkey/blob/main/LICENSE)).
 * **[Cloudflare](https://www.cloudflare.com/)**: WebSocket tunnel relay infrastructure.
 * GitHub & LinuxDo
 
