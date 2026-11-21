@@ -2,12 +2,12 @@ name: Android CI Build
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "fix/1.5.3" ]
     paths-ignore:
       - '**.md'
       - 'docs/**'
   pull_request:
-    branches: [ "main" ]
+    branches: [ "fix/1.5.3" ]
   workflow_dispatch:
 
 permissions:
