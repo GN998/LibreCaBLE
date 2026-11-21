@@ -5,7 +5,11 @@
 ![GMS-Free](https://img.shields.io/badge/GMS-Free-brightgreen)
 ![Vibe Coded](https://img.shields.io/badge/LLM-Vibe_Coded-orange)
 
-A lightweight, GMS-free FIDO2 hybrid transport (`caBLE v2` / CTAP 2.3 §11.5) and Proximity Exchange Protocol (PXP) bridge for Android 14+ (API 34+). It allows an Android device without Google Play Services to perform QR-initiated cross-device Passkey ceremonies as either an **Authenticator** (scanning another device's QR code) or a **Client Platform** (displaying a QR code for another device to scan).
+A lightweight, standalone FIDO2 hybrid transport (`caBLE v2` / CTAP 2.3 §11.5) and Proximity Exchange Protocol (PXP) passkey bridge for Android 14+ (API 34+). Built with zero Google Play Services dependencies, it works on **both standard Android devices and GMS-free custom ROMs** as either an **Authenticator** (scanning another device's QR code) or a **Client Platform** (displaying a QR code for another device to scan).
+
+<p align="center">
+  <img src="docs/demo.webp" width="320" alt="LibreCaBLE Demo" />
+</p>
 
 ## Features
 
