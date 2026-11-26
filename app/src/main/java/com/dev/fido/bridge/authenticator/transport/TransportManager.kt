@@ -349,11 +349,15 @@ class TransportManager(
                 )
 
                 val shouldConnect = synchronized(this@TransportManager) {
-                    ensureActive()
-                    if (priorChannel == null || activeChannel === priorChannel) {
+                    // Guard only initial setup with ensureActive(); async fallbacks run after setup completes and verify ownership via priorChannel
+                    if (priorChannel == null) {
+                        ensureActive()
+                        activeChannel = sessionWs
+                        true
+                    } else if (activeChannel === priorChannel) {
                         handshakeTimeoutJob?.cancel()
                         handshakeTimeoutJob = null
-                        priorChannel?.cancel()
+                        priorChannel.cancel()
                         activeChannel = sessionWs
                         true
                     } else {
@@ -394,7 +398,10 @@ class TransportManager(
                         serverPsm = psm,
                         onAdvertFailed = { errorCode ->
                             Log.w("TransportManager", "Extended BLE advert failed ($errorCode); falling back to WebSocket")
-                            startWebsocketFallback(priorChannel = sessionL2cap)
+                            // Offload HKDF derivation and WebSocket setup from the Main-looper AdvertisingSetCallback thread
+                            transportScope.launch {
+                                startWebsocketFallback(priorChannel = sessionL2cap)
+                            }
                         }
                     )
                     if (!dispatched) {
