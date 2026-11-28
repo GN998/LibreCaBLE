@@ -26,6 +26,11 @@ import java.util.concurrent.atomic.AtomicBoolean
 class ClientTransportManager(
     private val bleScanner: HybridBleScanner
 ) {
+    companion object {
+        // Bound blocking BluetoothSocket.connect() so stalled HCI setups fall back to WebSockets before the peer tunnel expires
+        private const val L2CAP_CONNECT_TIMEOUT_MS = 3_500L
+    }
+
     private val transportScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     @Volatile
@@ -33,6 +38,8 @@ class ClientTransportManager(
 
     @Volatile
     private var sessionTimeoutJob: Job? = null
+
+    private var l2capFallbackJob: Job? = null
 
     @Volatile
     var onStatusUpdate: ((String) -> Unit)? = null
@@ -42,6 +49,8 @@ class ClientTransportManager(
 
     private fun clearActiveSession(channel: PxpDataChannel?): Boolean = synchronized(this) {
         if (channel == null || activeChannel === channel) {
+            l2capFallbackJob?.cancel()
+            l2capFallbackJob = null
             sessionTimeoutJob?.cancel()
             sessionTimeoutJob = null
             activeChannel = null
@@ -122,7 +131,7 @@ class ClientTransportManager(
         }
     }
 
-    private fun connectTunnelAndExecuteCeremony(
+    private fun CoroutineScope.connectTunnelAndExecuteCeremony(
         qrSession: ClientQrSessionData,
         tunnelId: ByteArray,
         advert: com.dev.fido.bridge.core.transport.noise.DecryptedBleAdvert,
@@ -142,7 +151,7 @@ class ClientTransportManager(
 
         val noiseSession = ClientNoiseSession(
             identityPrivateKey = qrSession.identityPrivateKey,
-            uncompressedIdentityPubKey = qrSession.uncompressedIdentityPublicKey
+            uncompressedIdentityPubKey = qrSession.uncompressedIdentityPubKey
         )
         val awaitingPostHandshake = AtomicBoolean(true)
         val completed = AtomicBoolean(false)
@@ -160,12 +169,25 @@ class ClientTransportManager(
         }
 
         fun onChannelConnected(sourceChannel: PxpDataChannel) {
-            if (activeChannel === sourceChannel) {
-                // Build a fresh KNpsk0 ClientHello per connection attempt so fallback channels never reuse mutated handshake state
-                awaitingPostHandshake.set(true)
-                val clientHello = noiseSession.startHandshakeAndBuildClientHello(psk)
-                sourceChannel.sendFrame(clientHello)
+            val isOwned = synchronized(this@ClientTransportManager) {
+                if (activeChannel !== sourceChannel) {
+                    false
+                } else {
+                    // Disarm the connect watchdog atomically before sending ClientHello so a live L2CAP link is never aborted mid-handshake
+                    l2capFallbackJob?.cancel()
+                    l2capFallbackJob = null
+                    true
+                }
             }
+            if (!isOwned) {
+                // Abort stale channels that finish connecting after stopSession() or fallback takeover to prevent orphaned sockets
+                sourceChannel.cancel()
+                return
+            }
+            // Build a fresh KNpsk0 ClientHello outside the manager monitor so EC key generation does not block Main-thread stopSession()
+            awaitingPostHandshake.set(true)
+            val clientHello = noiseSession.startHandshakeAndBuildClientHello(psk)
+            sourceChannel.sendFrame(clientHello)
         }
 
         fun onChannelMessage(sourceChannel: PxpDataChannel, frame: ByteArray) {
@@ -231,7 +253,10 @@ class ClientTransportManager(
             }
         }
 
-        fun startWebsocketTransport(expectedPriorChannel: PxpDataChannel?) {
+        fun startWebsocketTransport(
+            expectedPriorChannel: PxpDataChannel?,
+            fromConnectTimeout: Boolean = false
+        ) {
             val domain = DomainDerivation.resolveDomainOrNull(advert.encodedTunnelServerDomain)
             if (domain == null) {
                 if (clearActiveSession(expectedPriorChannel)) {
@@ -250,10 +275,20 @@ class ClientTransportManager(
                 onStatusUpdate = null,
                 onDisconnected = { onChannelDisconnected(ws) }
             )
-            // Bind the WebSocket channel only if the session was not cancelled while L2CAP was attempting to connect
+            // Guard only initial setup with ensureActive(); require an armed watchdog for timeout fallback so a racing onChannelConnected() is never overridden
             val shouldConnect = synchronized(this@ClientTransportManager) {
-                if (expectedPriorChannel == null || activeChannel === expectedPriorChannel) {
-                    expectedPriorChannel?.cancel()
+                if (expectedPriorChannel == null) {
+                    ensureActive()
+                    activeChannel = ws
+                    true
+                } else if (activeChannel === expectedPriorChannel &&
+                    !noiseSession.isHandshakeComplete &&
+                    (!fromConnectTimeout || l2capFallbackJob != null)
+                ) {
+                    if (!fromConnectTimeout) {
+                        l2capFallbackJob?.cancel()
+                    }
+                    l2capFallbackJob = null
                     activeChannel = ws
                     true
                 } else {
@@ -261,7 +296,15 @@ class ClientTransportManager(
                 }
             }
             if (shouldConnect) {
-                ws.connect()
+                if (fromConnectTimeout) {
+                    Log.w("ClientTransport", "L2CAP connect timed out; falling back to WebSocket tunnel")
+                }
+                // Close the superseded L2CAP socket outside the monitor lock so Binder IPC cannot stall Main-thread stopSession()
+                expectedPriorChannel?.cancel()
+                // Skip dialing if stopSession() cleared ownership while closing the superseded L2CAP socket
+                if (activeChannel === ws) {
+                    ws.connect()
+                }
             }
         }
 
@@ -289,7 +332,7 @@ class ClientTransportManager(
                     }
                 },
                 onDisconnected = {
-                    if (!noiseSession.isHandshakeComplete && hasValidTunnelRoute) {
+                    if (activeChannel === l2cap && !noiseSession.isHandshakeComplete && hasValidTunnelRoute) {
                         Log.w("ClientTransport", "L2CAP disconnected pre-handshake; falling back to WebSocket tunnel")
                         startWebsocketTransport(expectedPriorChannel = l2cap)
                     } else {
@@ -297,8 +340,16 @@ class ClientTransportManager(
                     }
                 }
             )
-            synchronized(this) {
+            synchronized(this@ClientTransportManager) {
+                // Abort L2CAP setup if stopSession() cancelled this coroutine while deriving HKDF keys
+                ensureActive()
                 activeChannel = l2cap
+                if (hasValidTunnelRoute) {
+                    l2capFallbackJob = transportScope.launch {
+                        delay(L2CAP_CONNECT_TIMEOUT_MS)
+                        startWebsocketTransport(expectedPriorChannel = l2cap, fromConnectTimeout = true)
+                    }
+                }
             }
             l2cap.connect()
         } else {
@@ -308,6 +359,8 @@ class ClientTransportManager(
 
     @Synchronized
     fun stopSession() {
+        l2capFallbackJob?.cancel()
+        l2capFallbackJob = null
         sessionTimeoutJob?.cancel()
         sessionTimeoutJob = null
         transportScope.coroutineContext.cancelChildren()
